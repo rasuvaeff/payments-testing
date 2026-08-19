@@ -1,0 +1,34 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Rasuvaeff\PaymentsTesting;
+
+use Rasuvaeff\Payments\ConfirmGatewayInterface;
+use Rasuvaeff\Payments\PaymentAttempt;
+use Rasuvaeff\Payments\PaymentGatewayInterface;
+use Rasuvaeff\Payments\PaymentOperationRequest;
+use Rasuvaeff\PaymentsTesting\Internal\AttemptAssertions;
+
+/**
+ * @api
+ */
+final class ConfirmGatewayAssertions
+{
+    public static function assertConfirmPayment(
+        PaymentGatewayInterface&ConfirmGatewayInterface $gateway,
+        PaymentOperationRequest $request,
+    ): PaymentAttempt {
+        $attempt = $gateway->confirmPayment($request);
+        AttemptAssertions::payment(
+            attempt: $attempt,
+            provider: $gateway->provider(),
+            operationId: $request->operationId,
+            payment: $request->payment,
+        );
+
+        return $attempt;
+    }
+
+    private function __construct() {}
+}
