@@ -77,13 +77,32 @@ final class FakePaymentGatewayTest
         ));
     }
 
-    public function scopesIdempotencyKeyToOperation(): void
+    public function replaysIdempotencyKeyAcrossOperations(): void
     {
         $gateway = new FakePaymentGateway();
         $first = $gateway->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'shared-key'));
         $second = $gateway->createPayment(Fixtures::createPayment(operation: 'operation-2', idempotencyKey: 'shared-key'));
 
-        Assert::true($first->payment->id !== $second->payment->id);
+        // The provider keys the replay on the header value alone; it never
+        // learns which application operation issued the call. Two operations
+        // sharing one key is an application bug, and the fake must expose it
+        // the way the real gateway will — by answering the second call from
+        // the first payment rather than quietly opening a second one.
+        Assert::same($second->payment->id, $first->payment->id);
+    }
+
+    public function refusesSharedKeyAcrossOperationsWhenTheRequestDiffers(): void
+    {
+        $gateway = new FakePaymentGateway();
+        $gateway->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'shared-key'));
+
+        Expect::exception(\InvalidArgumentException::class)->withMessageContaining('Idempotency key');
+        $gateway->createPayment(new CreatePaymentRequest(
+            operationId: new OperationId(value: 'operation-2'),
+            amount: new Money(minorUnits: 9_999, currency: 'EUR'),
+            paymentMethod: new PaymentMethodReference(id: 'pm_1', kind: 'card'),
+            idempotencyKey: 'shared-key',
+        ));
     }
 
     public function rejectsUnknownAndForeignReferences(): void

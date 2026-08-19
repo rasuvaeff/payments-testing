@@ -97,7 +97,6 @@ final class FakeGatewayCore
         $amount = $request->amount ?? $stored->amount;
         $this->assertOperationIdempotency(
             operation: 'capture',
-            operationId: $request->operationId,
             key: $request->idempotencyKey,
             fingerprint: hash('sha256', $stored->payment->id . '|' . $amount->minorUnits . '|' . $amount->currency),
         );
@@ -110,7 +109,6 @@ final class FakeGatewayCore
         $stored = $this->payment($request->payment);
         $this->assertOperationIdempotency(
             operation: 'confirm',
-            operationId: $request->operationId,
             key: $request->idempotencyKey,
             fingerprint: hash('sha256', $stored->payment->id),
         );
@@ -123,7 +121,6 @@ final class FakeGatewayCore
         $stored = $this->payment($request->payment);
         $this->assertOperationIdempotency(
             operation: 'cancel',
-            operationId: $request->operationId,
             key: $request->idempotencyKey,
             fingerprint: hash('sha256', $stored->payment->id),
         );
@@ -260,7 +257,10 @@ final class FakeGatewayCore
         int $index,
         array &$entries,
     ): string {
-        $scope = $key === null ? null : $operationId->value . "\0" . $key;
+        // A provider never sees the application's OperationId: it keys the
+        // replay on the header value alone. Scoping by operation here would
+        // make the fake accept a key collision that the real gateway refuses.
+        $scope = $key;
 
         if ($scope !== null && isset($entries[$scope])) {
             if ($entries[$scope]['fingerprint'] !== $fingerprint) {
@@ -286,7 +286,6 @@ final class FakeGatewayCore
      */
     private function assertOperationIdempotency(
         string $operation,
-        OperationId $operationId,
         ?string $key,
         string $fingerprint,
     ): void {
@@ -294,7 +293,7 @@ final class FakeGatewayCore
             return;
         }
 
-        $scope = $operation . "\0" . $operationId->value . "\0" . $key;
+        $scope = $operation . "\0" . $key;
 
         if (isset($this->operationIdempotency[$scope]) && $this->operationIdempotency[$scope] !== $fingerprint) {
             throw new \InvalidArgumentException('Idempotency key was reused with a different fake request');

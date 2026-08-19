@@ -46,6 +46,16 @@ final class FixtureGateway implements
     /** @var array<string, string> */
     private array $idempotency = [];
 
+    /**
+     * Every refund request the double received, as `[idempotency key, amount]`.
+     *
+     * @var list<array{string|null, int}>
+     */
+    public array $refundsReceived = [];
+
+    /** @var array<string, string> */
+    private array $refundIdempotency = [];
+
     public function __construct(private readonly ?CapabilitySet $capabilities = null) {}
 
     #[\Override]
@@ -116,10 +126,23 @@ final class FixtureGateway implements
     public function createRefund(CreateRefundRequest $request): RefundAttempt
     {
         $amount = $request->amount ?? new Money(100, 'EUR');
+        $key = $request->idempotencyKey;
+        $this->refundsReceived[] = [$key, $amount->minorUnits];
+
+        if ($key !== null) {
+            $fingerprint = $amount->minorUnits . '|' . $amount->currency . '|' . $request->reason?->value;
+            $seen = $this->refundIdempotency[$key] ?? null;
+
+            if ($seen !== null && $seen !== $fingerprint) {
+                throw new \InvalidArgumentException('Refund idempotency key was reused with a different request');
+            }
+
+            $this->refundIdempotency[$key] = $fingerprint;
+        }
 
         return $this->refundAttempt(
             operationId: $request->operationId,
-            refund: new RefundReference($this->provider(), 'ref_' . ($request->idempotencyKey ?? $request->operationId->value)),
+            refund: new RefundReference($this->provider(), 'ref_' . ($key ?? $request->operationId->value)),
             payment: $request->payment,
             amount: $amount,
         );

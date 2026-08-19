@@ -43,7 +43,9 @@ $sameAttempt = $gateway->retrievePayment(new RetrievePaymentRequest(
 The fakes are fully deterministic:
 
 - Calls with the same idempotency key and the same request fingerprint return
-  the same provider reference.
+  the same provider reference. The key is the whole scope: a provider never
+  learns which `OperationId` issued the call, so two operations sharing one key
+  replay each other exactly as the real gateway would.
 - Reusing a key with different request data throws; calls without a key
   receive distinct deterministic references.
 - References from another provider and unknown references are rejected.
@@ -111,7 +113,7 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 | `ConfirmGatewayAssertions` | `assertConfirmPayment()` | Confirm preserves operation id and payment reference |
 | `CancelGatewayAssertions` | `assertCancelPayment()` | Cancel preserves operation id and payment reference |
 | `RefundGatewayAssertions` | `assertCreateRefund()` | Refund provider/payment/refund consistency, requested amount preserved |
-| `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Same keyed refund twice returns the same refund reference |
+| `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Replaying a key returns the same refund, a **different** key starts a new one, and reusing a key with a changed amount is refused |
 | `RefundGatewayAssertions` | `assertRetrieveRefund()` | Provider consistency, operation id and refund reference preserved |
 
 Capability-specific classes require the intersection type
