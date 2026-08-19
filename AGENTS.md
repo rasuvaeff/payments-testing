@@ -38,7 +38,11 @@ docker run --rm -v "$PWD":/app -w /app composer:2 composer test
   catch. When adding an assertion, write the broken double first and confirm it
   fails.
 
-- Same idempotency key plus same fingerprint returns the same reference.
+- Same idempotency key plus same fingerprint returns the same reference. The
+  key alone is the scope — never the `OperationId`, which no provider sees.
+  Scoping by operation makes the fake accept a key collision that the real
+  gateway refuses, and a permissive double is the one failure mode a testing
+  package cannot afford.
 - Same key plus different fingerprint throws; calls without a key remain distinct.
 - References from another provider and unknown references are rejected.
 - Time is fixed through `FakeGatewayConfig`; tests must not use the wall clock.

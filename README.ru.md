@@ -43,7 +43,10 @@ $sameAttempt = $gateway->retrievePayment(new RetrievePaymentRequest(
 Fakes полностью детерминированы:
 
 - Вызовы с одинаковым idempotency key и одинаковым fingerprint запроса
-  возвращают одну provider reference.
+  возвращают одну provider reference. Ключ — вся область видимости: провайдер
+  никогда не узнаёт, какой `OperationId` выдал вызов, поэтому две операции с
+  одним ключом воспроизводят друг друга ровно так, как это сделает настоящий
+  шлюз.
 - Повторное использование ключа с другими данными бросает исключение; вызовы
   без ключа получают разные детерминированные references.
 - References другого провайдера и неизвестные references отклоняются.
@@ -111,7 +114,7 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 | `ConfirmGatewayAssertions` | `assertConfirmPayment()` | Confirm сохраняет operation id и payment reference |
 | `CancelGatewayAssertions` | `assertCancelPayment()` | Cancel сохраняет operation id и payment reference |
 | `RefundGatewayAssertions` | `assertCreateRefund()` | Консистентность provider/payment/refund, сохранение requested amount |
-| `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Повтор keyed-refund возвращает ту же refund reference |
+| `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Повтор ключа возвращает тот же возврат, **другой** ключ начинает новый, а переиспользование ключа с изменённой суммой отвергается |
 | `RefundGatewayAssertions` | `assertRetrieveRefund()` | Консистентность провайдера, сохранение operation id и refund reference |
 
 Capability-специфичные классы требуют intersection-тип

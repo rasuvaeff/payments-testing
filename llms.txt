@@ -62,9 +62,10 @@ Checks performed: attempt/reference providers match `$g->provider()`;
 operation id, payment/refund references and requested amounts are preserved;
 idempotent replays return the same reference; `assertCapabilities` fails when
 `PartialRefundCapability` is advertised without `RefundGatewayInterface`.
-Idempotency asserts throw `InvalidArgumentException` when `idempotencyKey`
-is null. `assertCreatePaymentIdempotency` probes all three halves of the
-contract — same key returns the original payment, a different key
+Idempotency keys scope by the key alone, never by `OperationId`: a provider
+only ever sees the header value. Idempotency asserts throw
+`InvalidArgumentException` when `idempotencyKey` is null. `assertCreatePaymentIdempotency` and `assertCreateRefundIdempotency` probe
+all three halves of the contract — same key returns the original payment, a different key
 (`<key>-contract-other`) starts a new one, and the original key with
 `amount + 1` must be refused — so a gateway that ignores the key cannot pass.
 It therefore creates payments: run it against fakes or a sandbox.

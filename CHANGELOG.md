@@ -21,6 +21,16 @@ Initial release.
   `CancelGatewayAssertions` and `RefundGatewayAssertions` — that hold a real
   adapter to the same contracts the fakes implement, and fail with
   `ContractViolationException` naming the clause that broke.
+- Idempotency keys scope by the key alone. Scoping them by `OperationId` made
+  the fakes accept a key collision across two operations that every real
+  provider refuses — the one direction a testing double must not be wrong in,
+  because the application bug then passes its tests and surfaces in production.
+- `assertCreateRefundIdempotency()` holds refunds to the same three-part
+  contract as payments: replaying a key returns the original refund, a
+  different key starts a new one, and reusing a key with a changed amount is
+  refused. The probe steps the amount *down* wherever it can, so a gateway that
+  refuses it can only be refusing the key reuse rather than a balance it could
+  not cover.
 - `assertCreatePaymentIdempotency()` checks all three halves of the contract:
   replaying a key returns the original payment, a different key starts a new
   one, and reusing a key with a changed request is refused. Checking only the

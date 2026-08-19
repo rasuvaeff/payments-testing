@@ -9,6 +9,7 @@ use Rasuvaeff\Payments\CreateRefundRequest;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
 use Rasuvaeff\Payments\PaymentOperationRequest;
+use Rasuvaeff\Payments\PaymentProvider;
 use Rasuvaeff\Payments\PaymentReference;
 use Rasuvaeff\Payments\RefundReference;
 use Rasuvaeff\Payments\RetrieveRefundRequest;
@@ -71,6 +72,88 @@ final class OptionalGatewayAssertionsTest
         );
 
         Assert::same($retrieved->refund->id, 'ref_refund-key');
+    }
+
+    public function detectsRefundGatewayIgnoringTheIdempotencyKey(): void
+    {
+        $gateway = new ConstantRefundGateway();
+
+        Expect::exception(ContractViolationException::class)
+            ->withMessage('A different idempotency key returned the original refund reference');
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, self::keyedRefund());
+    }
+
+    public function detectsRefundGatewayAcceptingKeyReuse(): void
+    {
+        $gateway = new ConstantRefundGateway(acceptsKeyReuse: true);
+
+        Expect::exception(ContractViolationException::class)
+            ->withMessage('Reusing a refund idempotency key with a different request was accepted');
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, self::keyedRefund());
+    }
+
+    public function refusesRefundIdempotencyAssertionWithoutAKey(): void
+    {
+        $gateway = new FixtureGateway();
+
+        Expect::exception(\InvalidArgumentException::class)->withMessageContaining('idempotency key');
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, new CreateRefundRequest(
+            operationId: new OperationId('refund-1'),
+            payment: new PaymentReference($gateway->provider(), 'pay_1'),
+            amount: new Money(25, 'EUR'),
+        ));
+    }
+
+    public function issuesTheDocumentedRefundIdempotencyProbes(): void
+    {
+        $gateway = new FixtureGateway();
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, new CreateRefundRequest(
+            operationId: new OperationId('refund-1'),
+            payment: new PaymentReference($gateway->provider(), 'pay_1'),
+            amount: new Money(25, 'EUR'),
+            idempotencyKey: 'refund-key',
+        ));
+
+        Assert::same($gateway->refundsReceived, [
+            ['refund-key', 25],
+            ['refund-key', 25],
+            ['refund-key-contract-other', 25],
+            ['refund-key', 24],
+        ]);
+    }
+
+    /**
+     * A one-unit refund is legal input, and stepping down from it would ask
+     * for zero — an amount a gateway may refuse on its own grounds, which
+     * would let an ordinary validation error pass for idempotency
+     * enforcement. The probe steps up instead.
+     */
+    public function stepsTheRefundReuseProbeUpFromTheSmallestAmount(): void
+    {
+        $gateway = new FixtureGateway();
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, new CreateRefundRequest(
+            operationId: new OperationId('refund-1'),
+            payment: new PaymentReference($gateway->provider(), 'pay_1'),
+            amount: new Money(1, 'EUR'),
+            idempotencyKey: 'refund-key',
+        ));
+
+        Assert::same($gateway->refundsReceived, [
+            ['refund-key', 1],
+            ['refund-key', 1],
+            ['refund-key-contract-other', 1],
+            ['refund-key', 2],
+        ]);
+    }
+
+    private static function keyedRefund(): CreateRefundRequest
+    {
+        return new CreateRefundRequest(
+            operationId: new OperationId('refund-1'),
+            payment: new PaymentReference(new PaymentProvider('fake'), 'pay_1'),
+            amount: new Money(25, 'EUR'),
+            idempotencyKey: 'refund-key',
+        );
     }
 
     public function detectsCaptureOperationIdViolation(): void
