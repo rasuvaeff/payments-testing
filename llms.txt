@@ -1,0 +1,70 @@
+# payments-testing
+
+Install: `composer require --dev rasuvaeff/payments-testing`
+
+Rules: namespace `Rasuvaeff\PaymentsTesting`; contracts come from
+`rasuvaeff/payments` (`Rasuvaeff\Payments`). `FakePaymentGateway` implements
+only the base `PaymentGatewayInterface`. Use `FakeCaptureGateway`,
+`FakeConfirmGateway`, `FakeCancelGateway` or `FakeRefundGateway` when that
+optional interface is required. Idempotency keys replay only identical request
+fingerprints; a reused key with different data throws. Time is fixed via
+`FakeGatewayConfig::$now` — never the wall clock. Assertions throw
+`ContractViolationException` (extends `RuntimeException`) on violations and
+work with any test framework.
+
+## Fake gateways
+
+```php
+$config = new FakeGatewayConfig(
+    provider: new PaymentProvider(value: 'fake'),          // default 'fake'
+    capabilities: CapabilitySet::of(),                     // default empty
+    now: new \DateTimeImmutable('2025-01-01T00:00:00+00:00'), // default shown
+    createState: PaymentState::Succeeded,                  // default
+);
+$gateway = new FakePaymentGateway(config: $config);        // config optional
+$attempt = $gateway->createPayment($createPaymentRequest); // PaymentAttempt
+$attempt = $gateway->retrievePayment($retrievePaymentRequest);
+$gateway->provider();      // PaymentProvider
+$gateway->capabilities();  // CapabilitySet
+```
+
+- `FakeCaptureGateway::capturePayment(CapturePaymentRequest): PaymentAttempt`
+- `FakeConfirmGateway::confirmPayment(PaymentOperationRequest): PaymentAttempt`
+- `FakeCancelGateway::cancelPayment(PaymentOperationRequest): PaymentAttempt`
+- `FakeRefundGateway::createRefund(CreateRefundRequest): RefundAttempt`,
+  `retrieveRefund(RetrieveRefundRequest): RefundAttempt`
+- `PartialRefundCapability` in config of a non-refund fake →
+  `InvalidArgumentException`.
+
+## Contract assertions
+
+All static, all return the resulting attempt, all throw
+`ContractViolationException` on contract violations. Capability-specific
+methods require intersection types
+(`PaymentGatewayInterface&CaptureGatewayInterface` etc.).
+
+```php
+PaymentGatewayAssertions::assertCapabilities(PaymentGatewayInterface $g): CapabilitySet;
+PaymentGatewayAssertions::assertCreatePayment(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt;
+PaymentGatewayAssertions::assertCreatePaymentIdempotency(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt; // needs idempotencyKey
+PaymentGatewayAssertions::assertRetrievePayment(PaymentGatewayInterface $g, RetrievePaymentRequest $r): PaymentAttempt;
+
+CaptureGatewayAssertions::assertCapturePayment(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt;
+ConfirmGatewayAssertions::assertConfirmPayment(PaymentGatewayInterface&ConfirmGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt;
+CancelGatewayAssertions::assertCancelPayment(PaymentGatewayInterface&CancelGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt;
+
+RefundGatewayAssertions::assertCreateRefund(PaymentGatewayInterface&RefundGatewayInterface $g, CreateRefundRequest $r): RefundAttempt;
+RefundGatewayAssertions::assertCreateRefundIdempotency(PaymentGatewayInterface&RefundGatewayInterface $g, CreateRefundRequest $r): RefundAttempt; // needs idempotencyKey
+RefundGatewayAssertions::assertRetrieveRefund(PaymentGatewayInterface&RefundGatewayInterface $g, RetrieveRefundRequest $r): RefundAttempt;
+```
+
+Checks performed: attempt/reference providers match `$g->provider()`;
+operation id, payment/refund references and requested amounts are preserved;
+idempotent replays return the same reference; `assertCapabilities` fails when
+`PartialRefundCapability` is advertised without `RefundGatewayInterface`.
+Idempotency asserts throw `InvalidArgumentException` when `idempotencyKey`
+is null. `assertCreatePaymentIdempotency` probes all three halves of the
+contract — same key returns the original payment, a different key
+(`<key>-contract-other`) starts a new one, and the original key with
+`amount + 1` must be refused — so a gateway that ignores the key cannot pass.
+It therefore creates payments: run it against fakes or a sandbox.
