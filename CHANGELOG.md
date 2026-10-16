@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- Accept `rasuvaeff/payments` `^0.2` alongside `^0.1`. The 0.2.0 break —
+  claim-fenced `WebhookEventStoreInterface` — is in an API this package does
+  not touch; the fakes and the contract assertions build unchanged against
+  0.2.0, and the lowest-dependency job keeps covering 0.1.
+
 ## 0.1.0 — 2026-08-19
 
 Initial release.
