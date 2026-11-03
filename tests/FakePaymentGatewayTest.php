@@ -18,6 +18,9 @@ use Rasuvaeff\Payments\RefundGatewayInterface;
 use Rasuvaeff\Payments\RetrievePaymentRequest;
 use Rasuvaeff\PaymentsTesting\FakeGatewayConfig;
 use Rasuvaeff\PaymentsTesting\FakePaymentGateway;
+use Rasuvaeff\PaymentsTesting\Internal\AbstractFakeGateway;
+use Rasuvaeff\PaymentsTesting\Internal\AttemptAssertions;
+use Rasuvaeff\PaymentsTesting\Internal\FakeGatewayCore;
 use Rasuvaeff\PaymentsTesting\PaymentGatewayAssertions;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -27,6 +30,9 @@ use Testo\Test;
 #[Test]
 #[Covers(FakePaymentGateway::class)]
 #[Covers(FakeGatewayConfig::class)]
+#[Covers(AbstractFakeGateway::class)]
+#[Covers(AttemptAssertions::class)]
+#[Covers(FakeGatewayCore::class)]
 final class FakePaymentGatewayTest
 {
     public function implementsOnlyBaseGatewayByDefault(): void

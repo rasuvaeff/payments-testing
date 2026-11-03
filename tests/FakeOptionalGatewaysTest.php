@@ -21,6 +21,9 @@ use Rasuvaeff\PaymentsTesting\FakeCaptureGateway;
 use Rasuvaeff\PaymentsTesting\FakeConfirmGateway;
 use Rasuvaeff\PaymentsTesting\FakeGatewayConfig;
 use Rasuvaeff\PaymentsTesting\FakeRefundGateway;
+use Rasuvaeff\PaymentsTesting\Internal\AbstractFakeGateway;
+use Rasuvaeff\PaymentsTesting\Internal\AttemptAssertions;
+use Rasuvaeff\PaymentsTesting\Internal\FakeGatewayCore;
 use Rasuvaeff\PaymentsTesting\RefundGatewayAssertions;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -32,6 +35,9 @@ use Testo\Test;
 #[Covers(FakeConfirmGateway::class)]
 #[Covers(FakeCancelGateway::class)]
 #[Covers(FakeRefundGateway::class)]
+#[Covers(AbstractFakeGateway::class)]
+#[Covers(AttemptAssertions::class)]
+#[Covers(FakeGatewayCore::class)]
 final class FakeOptionalGatewaysTest
 {
     public function captureFakeSatisfiesContract(): void
