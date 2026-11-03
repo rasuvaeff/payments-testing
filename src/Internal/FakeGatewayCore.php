@@ -36,7 +36,7 @@ final class FakeGatewayCore
     private array $paymentIdempotency = [];
     /** @var array<string, IdempotencyEntry> */
     private array $refundIdempotency = [];
-    /** @var array<string, non-empty-string> */
+    /** @var array<string, array<string, non-empty-string>> */
     private array $operationIdempotency = [];
     /** @var int<0, max> */
     private int $paymentSequence = 0;
@@ -98,7 +98,7 @@ final class FakeGatewayCore
         $this->assertOperationIdempotency(
             operation: 'capture',
             key: $request->idempotencyKey,
-            fingerprint: hash('sha256', $stored->payment->id . '|' . $amount->minorUnits . '|' . $amount->currency),
+            fingerprint: hash('sha256', serialize([$stored->payment->id, $amount->minorUnits, $amount->currency])),
         );
 
         return $this->replacePayment($stored, $request->operationId, $amount, PaymentState::Succeeded);
@@ -293,12 +293,10 @@ final class FakeGatewayCore
             return;
         }
 
-        $scope = $operation . "\0" . $key;
-
-        if (isset($this->operationIdempotency[$scope]) && $this->operationIdempotency[$scope] !== $fingerprint) {
+        if (isset($this->operationIdempotency[$operation][$key]) && $this->operationIdempotency[$operation][$key] !== $fingerprint) {
             throw new \InvalidArgumentException('Idempotency key was reused with a different fake request');
         }
 
-        $this->operationIdempotency[$scope] = $fingerprint;
+        $this->operationIdempotency[$operation][$key] = $fingerprint;
     }
 }
