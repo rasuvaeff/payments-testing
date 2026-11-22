@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 - `composer mutation` now runs Infection with `--with-uncovered`, so code the tests execute without naming it in `#[Covers]` is mutated and counted (overall MSI was 41% when measured this way, now 100% against `minMsi` 100). `Internal\AbstractFakeGateway`, `Internal\AttemptAssertions` and `Internal\FakeGatewayCore` were named in no `#[Covers]` and caused all 94 Not Covered mutants. Added `FakeGatewayCoreTest` (pinned fake references, idempotency scoping per operation and payment, null-safe reads, unknown/foreign refund references) and `AttemptAssertionsTest` (every contract violation message). `infection.json5` gained the template's signature-default ignore regex, `testFrameworkOptions` (Unit suite only) and disabled `PublicVisibility`/`ProtectedVisibility`; three equivalent `MethodCallRemoval` mutants in `AttemptAssertions` are ignored with a comment. The capture fingerprint and the confirm/cancel/capture idempotency scope inside `FakeGatewayCore` no longer use string concatenation (`serialize([...])` and a nested array); both are internal and not observable, so behaviour is unchanged.
+- **Changed:** PHP 8.6 is supported: the `php` constraint is widened to
+  `8.3 - 8.6` (#6). CI runs PHP 8.6 as a regular matrix entry; the
+  backward-compatibility job runs on PHP 8.5.
 
 ## 0.1.1 — 2026-10-16
 
