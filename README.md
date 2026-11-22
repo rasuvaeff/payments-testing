@@ -16,7 +16,7 @@ contracts the fakes do.
 
 ## Requirements
 
-- PHP 8.3+
+- PHP 8.3 – 8.6
 - `rasuvaeff/payments`
 
 ## Installation
