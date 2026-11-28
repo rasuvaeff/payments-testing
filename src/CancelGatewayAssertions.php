@@ -30,5 +30,30 @@ final class CancelGatewayAssertions
         return $attempt;
     }
 
+    /**
+     * A replayed cancel must be answered from the first one: the same
+     * state, without running the operation again (each call is also checked
+     * by assertCancelPayment(), so both carry the requested payment
+     * reference). The key reused for another payment is not probed — that
+     * needs a second payment.
+     */
+    public static function assertCancelPaymentIdempotency(
+        PaymentGatewayInterface&CancelGatewayInterface $gateway,
+        PaymentOperationRequest $request,
+    ): PaymentAttempt {
+        if ($request->idempotencyKey === null) {
+            throw new \InvalidArgumentException('Idempotency assertion requires an idempotency key');
+        }
+
+        $first = self::assertCancelPayment($gateway, $request);
+        $second = self::assertCancelPayment($gateway, $request);
+
+        if ($second->state !== $first->state) {
+            throw new ContractViolationException('A replayed cancel reported another state');
+        }
+
+        return $second;
+    }
+
     private function __construct() {}
 }

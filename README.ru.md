@@ -129,9 +129,12 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 | `PaymentGatewayAssertions` | `assertCreatePayment()` | Консистентность провайдера, сохранение operation id и amount |
 | `PaymentGatewayAssertions` | `assertCreatePaymentIdempotency()` | Повтор ключа возвращает тот же платёж, **другой** ключ начинает новый, а переиспользование ключа с изменённым запросом отвергается |
 | `PaymentGatewayAssertions` | `assertRetrievePayment()` | Консистентность провайдера, сохранение operation id и payment reference |
-| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture сохраняет operation id и amount, провайдер консистентен |
+| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture сохраняет operation id и amount, провайдер консистентен (payment reference не сравнивается: PayPal отвечает reference самого capture) |
+| `CaptureGatewayAssertions` | `assertCapturePaymentIdempotency()` | Повтор ключа возвращает ту же reference, сумму и состояние, а переиспользование ключа с изменённой суммой отвергается |
 | `ConfirmGatewayAssertions` | `assertConfirmPayment()` | Confirm сохраняет operation id и payment reference |
+| `ConfirmGatewayAssertions` | `assertConfirmPaymentIdempotency()` | Повтор ключа возвращает то же состояние |
 | `CancelGatewayAssertions` | `assertCancelPayment()` | Cancel сохраняет operation id и payment reference |
+| `CancelGatewayAssertions` | `assertCancelPaymentIdempotency()` | Повтор ключа возвращает то же состояние |
 | `RefundGatewayAssertions` | `assertCreateRefund()` | Консистентность provider/payment/refund, сохранение requested amount |
 | `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Повтор ключа возвращает тот же возврат, **другой** ключ начинает новый, а переиспользование ключа с изменённой суммой отвергается |
 | `RefundGatewayAssertions` | `assertRetrieveRefund()` | Консистентность провайдера, сохранение operation id и refund reference |
@@ -144,6 +147,18 @@ framework-специфичных проверок.
 
 Idempotency-assertions требуют `idempotencyKey` в запросе и бросают
 `InvalidArgumentException`, если он отсутствует.
+
+Проба переиспользования ключа считает отказом только ответ: любое `\Exception`,
+которое шлюз бросил на изменённый запрос, кроме `TransportException`,
+`ServerException`, `RateLimitedException`, `UnauthorizedException` и
+`ForbiddenException`. Они ничего не говорят о ключе, поэтому пробрасываются, и
+assertion не пройден, а не засчитан; `\Error` вроде `TypeError` тоже
+пробрасывается. Шлюз, отвергающий изменённый запрос по своим причинам (адаптер
+без частичного capture), эту половину всё равно проходит.
+
+Не проверяется: состояние, которое сообщает операция (capture законно может
+вернуть `Processing`, `Pending` или `Failed`), и ключ confirm или cancel,
+переиспользованный для другого платежа.
 
 ## Безопасность
 

@@ -58,9 +58,12 @@ PaymentGatewayAssertions::assertCreatePayment(PaymentGatewayInterface $g, Create
 PaymentGatewayAssertions::assertCreatePaymentIdempotency(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt; // needs idempotencyKey
 PaymentGatewayAssertions::assertRetrievePayment(PaymentGatewayInterface $g, RetrievePaymentRequest $r): PaymentAttempt;
 
-CaptureGatewayAssertions::assertCapturePayment(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt;
+CaptureGatewayAssertions::assertCapturePayment(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt; // reference not compared
+CaptureGatewayAssertions::assertCapturePaymentIdempotency(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt; // needs idempotencyKey
 ConfirmGatewayAssertions::assertConfirmPayment(PaymentGatewayInterface&ConfirmGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt;
+ConfirmGatewayAssertions::assertConfirmPaymentIdempotency(PaymentGatewayInterface&ConfirmGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt; // needs idempotencyKey
 CancelGatewayAssertions::assertCancelPayment(PaymentGatewayInterface&CancelGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt;
+CancelGatewayAssertions::assertCancelPaymentIdempotency(PaymentGatewayInterface&CancelGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt; // needs idempotencyKey
 
 RefundGatewayAssertions::assertCreateRefund(PaymentGatewayInterface&RefundGatewayInterface $g, CreateRefundRequest $r): RefundAttempt;
 RefundGatewayAssertions::assertCreateRefundIdempotency(PaymentGatewayInterface&RefundGatewayInterface $g, CreateRefundRequest $r): RefundAttempt; // needs idempotencyKey
@@ -81,3 +84,10 @@ create probe asks for `amount + 1` (`- 1` at `PHP_INT_MAX`); the refund probe
 asks for `amount - 1` (`+ 1` when the amount is 0 or 1), so an ordinary balance
 check cannot pass for idempotency enforcement.
 It therefore creates payments: run it against fakes or a sandbox.
+`assertCapturePaymentIdempotency` replays the key (same reference, amount,
+state) and probes the key with the captured amount `- 1` (`+ 1` at 0 or 1);
+`assertConfirmPaymentIdempotency` / `assertCancelPaymentIdempotency` replay the
+key and compare the state. A key-reuse probe counts any `\Exception` as a
+refusal except `TransportException`, `ServerException`, `RateLimitedException`,
+`UnauthorizedException`, `ForbiddenException` (rethrown: inconclusive);
+`\Error` is not caught. Operation states are not checked.

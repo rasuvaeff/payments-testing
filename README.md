@@ -130,9 +130,12 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 | `PaymentGatewayAssertions` | `assertCreatePayment()` | Provider consistency, operation id and amount preserved |
 | `PaymentGatewayAssertions` | `assertCreatePaymentIdempotency()` | Replaying a key returns the same payment, a **different** key starts a new one, and reusing a key with a changed request is refused |
 | `PaymentGatewayAssertions` | `assertRetrievePayment()` | Provider consistency, operation id and payment reference preserved |
-| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture preserves operation id and amount, provider consistent |
+| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture preserves operation id and amount, provider consistent (the payment reference is not compared: PayPal answers with the capture's) |
+| `CaptureGatewayAssertions` | `assertCapturePaymentIdempotency()` | Replaying a key returns the same reference, amount and state, and reusing the key with a changed amount is refused |
 | `ConfirmGatewayAssertions` | `assertConfirmPayment()` | Confirm preserves operation id and payment reference |
+| `ConfirmGatewayAssertions` | `assertConfirmPaymentIdempotency()` | Replaying a key returns the same state |
 | `CancelGatewayAssertions` | `assertCancelPayment()` | Cancel preserves operation id and payment reference |
+| `CancelGatewayAssertions` | `assertCancelPaymentIdempotency()` | Replaying a key returns the same state |
 | `RefundGatewayAssertions` | `assertCreateRefund()` | Refund provider/payment/refund consistency, requested amount preserved |
 | `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Replaying a key returns the same refund, a **different** key starts a new one, and reusing a key with a changed amount is refused |
 | `RefundGatewayAssertions` | `assertRetrieveRefund()` | Provider consistency, operation id and refund reference preserved |
@@ -145,6 +148,18 @@ further framework-specific checks.
 
 Idempotency assertions require `idempotencyKey` on the request and throw
 `InvalidArgumentException` when it is missing.
+
+The key-reuse probe counts only an answer as a refusal: any `\Exception` the
+gateway throws for the changed request, except `TransportException`,
+`ServerException`, `RateLimitedException`, `UnauthorizedException` and
+`ForbiddenException`. Those say nothing about the key, so they propagate and
+the assertion is inconclusive rather than passed; an `\Error` such as a
+`TypeError` propagates too. A gateway that refuses the changed request on its
+own grounds (an adapter without partial capture) still passes that half.
+
+Not checked: the state an operation reports (a capture may legitimately come
+back `Processing`, `Pending` or `Failed`), and a confirm or cancel key reused
+for another payment.
 
 ## Security
 

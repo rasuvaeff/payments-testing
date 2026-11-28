@@ -11,6 +11,7 @@ use Rasuvaeff\Payments\RefundAttempt;
 use Rasuvaeff\Payments\RefundGatewayInterface;
 use Rasuvaeff\Payments\RetrieveRefundRequest;
 use Rasuvaeff\PaymentsTesting\Internal\AttemptAssertions;
+use Rasuvaeff\PaymentsTesting\Internal\KeyReuseProbe;
 
 /**
  * @api
@@ -85,9 +86,7 @@ final class RefundGatewayAssertions
             idempotencyKey: $key,
         );
 
-        try {
-            $gateway->createRefund($conflicting);
-        } catch (\Throwable) {
+        if (KeyReuseProbe::refused(static fn(): RefundAttempt => $gateway->createRefund($conflicting))) {
             return;
         }
 
