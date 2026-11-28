@@ -145,8 +145,10 @@ Capability-специфичные классы требуют intersection-ти�
 Каждый assertion-метод возвращает полученный attempt для дальнейших
 framework-специфичных проверок.
 
-Idempotency-assertions требуют `idempotencyKey` в запросе и бросают
-`InvalidArgumentException`, если он отсутствует.
+Idempotency-assertions для capture, confirm, cancel и refund требуют
+`idempotencyKey` в запросе и бросают `InvalidArgumentException`, если он
+отсутствует. У `CreatePaymentRequest` ключ есть всегда — переданный или
+сгенерированный им UUID, — и `assertCreatePaymentIdempotency()` реплеит его.
 
 Проба переиспользования ключа считает отказом только ответ: любое `\Exception`,
 которое шлюз бросил на изменённый запрос, кроме `TransportException`,

@@ -55,7 +55,7 @@ methods require intersection types
 ```php
 PaymentGatewayAssertions::assertCapabilities(PaymentGatewayInterface $g): CapabilitySet;
 PaymentGatewayAssertions::assertCreatePayment(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt;
-PaymentGatewayAssertions::assertCreatePaymentIdempotency(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt; // needs idempotencyKey
+PaymentGatewayAssertions::assertCreatePaymentIdempotency(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt; // replays the request's (possibly generated) key
 PaymentGatewayAssertions::assertRetrievePayment(PaymentGatewayInterface $g, RetrievePaymentRequest $r): PaymentAttempt;
 
 CaptureGatewayAssertions::assertCapturePayment(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt; // reference not compared
@@ -75,8 +75,9 @@ operation id, payment/refund references and requested amounts are preserved;
 idempotent replays return the same reference; `assertCapabilities` fails when
 `PartialRefundCapability` is advertised without `RefundGatewayInterface`.
 Idempotency keys scope by the key alone, never by `OperationId`: a provider
-only ever sees the header value. Idempotency asserts throw
-`InvalidArgumentException` when `idempotencyKey` is null. `assertCreatePaymentIdempotency` and `assertCreateRefundIdempotency` probe
+only ever sees the header value. Capture/confirm/cancel/refund idempotency asserts throw
+`InvalidArgumentException` when `idempotencyKey` is null; a create request
+always has one (given or generated UUID v4). `assertCreatePaymentIdempotency` and `assertCreateRefundIdempotency` probe
 all three halves of the contract — same key returns the original payment, a different key
 (`<key>-contract-other`) starts a new one, and the original key with a changed
 amount must be refused — so a gateway that ignores the key cannot pass. The

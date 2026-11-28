@@ -60,11 +60,6 @@ final class PaymentGatewayAssertions
     public static function assertCreatePaymentIdempotency(PaymentGatewayInterface $gateway, CreatePaymentRequest $request): PaymentAttempt
     {
         $key = $request->idempotencyKey;
-
-        if ($key === null) {
-            throw new \InvalidArgumentException('Idempotency assertion requires an idempotency key');
-        }
-
         $first = self::assertCreatePayment($gateway, $request);
         $second = self::assertCreatePayment($gateway, $request);
         AttemptAssertions::same($second->payment, $first->payment, 'Payment idempotency key produced another reference');

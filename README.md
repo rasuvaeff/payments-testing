@@ -146,8 +146,10 @@ adapter that does not implement the optional interface is a type error, not a
 runtime surprise. Every assertion method returns the resulting attempt for
 further framework-specific checks.
 
-Idempotency assertions require `idempotencyKey` on the request and throw
-`InvalidArgumentException` when it is missing.
+The capture, confirm, cancel and refund idempotency assertions require
+`idempotencyKey` on the request and throw `InvalidArgumentException` when it
+is missing. A `CreatePaymentRequest` always has a key — the one you passed or
+the UUID it generated — so `assertCreatePaymentIdempotency()` replays that.
 
 The key-reuse probe counts only an answer as a refusal: any `\Exception` the
 gateway throws for the changed request, except `TransportException`,

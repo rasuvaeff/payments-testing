@@ -16,6 +16,7 @@ use Rasuvaeff\Payments\PaymentProvider;
 use Rasuvaeff\Payments\PaymentReference;
 use Rasuvaeff\Payments\RetrievePaymentRequest;
 use Rasuvaeff\PaymentsTesting\ContractViolationException;
+use Rasuvaeff\PaymentsTesting\FakePaymentGateway;
 use Rasuvaeff\PaymentsTesting\PaymentGatewayAssertions;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -223,10 +224,16 @@ final class PaymentGatewayAssertionsTest
         ]);
     }
 
-    public function idempotencyAssertionRequiresKey(): void
+    /**
+     * A request built without a key carries the one it generated, and the
+     * replay half of the assertion resends exactly that key.
+     */
+    public function idempotencyAssertionUsesAGeneratedKey(): void
     {
-        Expect::exception(\InvalidArgumentException::class);
-        PaymentGatewayAssertions::assertCreatePaymentIdempotency(new FixtureGateway(), $this->createRequest('operation-3'));
+        $request = $this->createRequest('operation-3');
+        $attempt = PaymentGatewayAssertions::assertCreatePaymentIdempotency(new FakePaymentGateway(), $request);
+
+        Assert::same($attempt->operationId->value, 'operation-3');
     }
 
     private function createRequest(string $operationId, ?string $key = null): CreatePaymentRequest
