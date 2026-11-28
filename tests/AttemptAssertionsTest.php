@@ -183,6 +183,81 @@ final class AttemptAssertionsTest
         );
     }
 
+    /**
+     * Loose `!=` compares numeric strings as numbers, so it called
+     * `OperationId('100')` equal to `OperationId('1e2')`.
+     */
+    #[DataProvider('numericLookalikeProvider')]
+    public function comparesScalarFieldsStrictly(object $actual, object $expected): void
+    {
+        Expect::exception(ContractViolationException::class)->withMessage('differs');
+        AttemptAssertions::same(actual: $actual, expected: $expected, message: 'differs');
+    }
+
+    /** @return iterable<string, array{object, object}> */
+    public static function numericLookalikeProvider(): iterable
+    {
+        $provider = new PaymentProvider(value: 'fake');
+
+        yield 'operation id in exponent form' => [new OperationId(value: '100'), new OperationId(value: '1e2')];
+        yield 'payment id with a leading zero' => [
+            new PaymentReference(provider: $provider, id: '10'),
+            new PaymentReference(provider: $provider, id: '010'),
+        ];
+        yield 'payment kind with a leading zero' => [
+            new PaymentReference(provider: $provider, id: 'p', kind: '1'),
+            new PaymentReference(provider: $provider, id: 'p', kind: '01'),
+        ];
+        yield 'refund id in exponent form' => [
+            new RefundReference(provider: $provider, id: '100'),
+            new RefundReference(provider: $provider, id: '1e2'),
+        ];
+        yield 'refund kind' => [
+            new RefundReference(provider: $provider, id: 'r', kind: 'refund'),
+            new RefundReference(provider: $provider, id: 'r'),
+        ];
+        yield 'payment provider' => [new PaymentProvider(value: 'fake'), new PaymentProvider(value: 'other')];
+        yield 'reference provider' => [
+            new PaymentReference(provider: $provider, id: 'p'),
+            new PaymentReference(provider: new PaymentProvider(value: 'other'), id: 'p'),
+        ];
+        yield 'refund reference provider' => [
+            new RefundReference(provider: $provider, id: 'r'),
+            new RefundReference(provider: new PaymentProvider(value: 'other'), id: 'r'),
+        ];
+        yield 'payment and refund reference with the same fields' => [
+            new PaymentReference(provider: $provider, id: 'x', kind: 'k'),
+            new RefundReference(provider: $provider, id: 'x', kind: 'k'),
+        ];
+        yield 'money currency' => [new Money(minorUnits: 1, currency: 'EUR'), new Money(minorUnits: 1, currency: 'USD')];
+        yield 'different value types' => [new OperationId(value: 'fake'), new PaymentProvider(value: 'fake')];
+    }
+
+    #[DataProvider('equalValueProvider')]
+    #[ExpectNoAssertions]
+    public function acceptsEqualValuesBuiltSeparately(object $actual, object $expected): void
+    {
+        AttemptAssertions::same(actual: $actual, expected: $expected, message: 'differs');
+    }
+
+    /** @return iterable<string, array{object, object}> */
+    public static function equalValueProvider(): iterable
+    {
+        $provider = static fn(): PaymentProvider => new PaymentProvider(value: 'fake');
+
+        yield 'operation id' => [new OperationId(value: '100'), new OperationId(value: '100')];
+        yield 'provider' => [$provider(), $provider()];
+        yield 'payment reference' => [
+            new PaymentReference(provider: $provider(), id: 'p', kind: 'payment'),
+            new PaymentReference(provider: $provider(), id: 'p', kind: 'payment'),
+        ];
+        yield 'refund reference' => [
+            new RefundReference(provider: $provider(), id: 'r', kind: 'refund'),
+            new RefundReference(provider: $provider(), id: 'r', kind: 'refund'),
+        ];
+        yield 'money' => [new Money(minorUnits: 5, currency: 'EUR'), new Money(minorUnits: 5, currency: 'EUR')];
+    }
+
     private function paymentAttempt(): PaymentAttempt
     {
         return (new FakeGatewayCore(new FakeGatewayConfig()))->createPayment(Fixtures::createPayment());

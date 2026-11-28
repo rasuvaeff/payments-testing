@@ -75,9 +75,26 @@ final class AttemptAssertions
         object $expected,
         string $message,
     ): void {
-        if ($actual != $expected) {
+        // Field by field with ===: loose != compares numeric strings as
+        // numbers, so OperationId('100') equalled OperationId('1e2').
+        if ($actual::class !== $expected::class || self::fields($actual) !== self::fields($expected)) {
             throw new ContractViolationException($message);
         }
+    }
+
+    /**
+     * @param ContractValue $value
+     * @return list<int|string|null>
+     */
+    private static function fields(object $value): array
+    {
+        return match (true) {
+            $value instanceof Money => [$value->minorUnits, $value->currency],
+            $value instanceof OperationId => [$value->value],
+            $value instanceof PaymentProvider => [$value->value],
+            $value instanceof PaymentReference => [$value->provider->value, $value->id, $value->kind],
+            $value instanceof RefundReference => [$value->provider->value, $value->id, $value->kind],
+        };
     }
 
     private function __construct() {}

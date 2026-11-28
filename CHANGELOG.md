@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+- **Fixed:** the contract assertions compare operation ids, providers, references and amounts field by field with `===`. They used loose `!=`, which compares numeric strings as numbers, so an adapter returning `OperationId('1e2')` for `OperationId('100')`, or payment id `'010'` for `'10'`, passed.
 - **Fixed:** a replayed `createPayment()` (same idempotency key, same request) no longer rewrites the stored payment. The fake rebuilt the attempt from `FakeGatewayConfig::$createState` and the request amount and saved it, so a payment created as `RequiresCapture` and captured for 5000 read back as `RequiresCapture`/1000 after the replay. A replay now returns the response saved for the key — the payment as it was created, with the replay's `OperationId` — which is what a provider does (https://docs.stripe.com/api/idempotent_requests), and the stored payment is left as it is. **Behaviour change** for tests that relied on the rollback.
 
 ## 0.1.2 — 2026-11-22
