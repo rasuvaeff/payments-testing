@@ -25,9 +25,14 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 1
-    # Raise the constraint instead of widening it: "^1.2 || ^2.0" promises a
-    # major that no job tests (root AGENTS.md, one major per constraint).
-    versioning-strategy: increase
+    # Libraries have no lock file. "increase" raised every floor to the newest
+    # release, and a dev tool's newest release can drop the package's oldest
+    # PHP (roave 8.27 needs 8.4: payments#18 failed on 8.3 and Prefer lowest).
+    # "increase-if-necessary" touches a constraint only when a new release
+    # falls outside it — a new major — and replaces it instead of widening it
+    # to "^1.2 || ^2.0" (root AGENTS.md, one major per constraint). Floors stay
+    # where the Prefer lowest job tests them.
+    versioning-strategy: increase-if-necessary
     # rasuvaeff/* move together with their families, by hand.
     ignore:
       - dependency-name: "rasuvaeff/*"
