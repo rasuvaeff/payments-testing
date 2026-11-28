@@ -38,10 +38,11 @@ use Testo\Assert;
  * create's own key among them — so replays and key conflicts are ordinary.
  *
  * The model is written from the provider's rules, not from the fake's code:
- * capture only an authorization and never above it, confirm only what
- * awaits confirmation, cancel only what has not finished, refund only what
- * was captured and not yet refunded; a key answers from its first call and
- * refuses any other request.
+ * capture only an authorization, a positive amount never above it; confirm
+ * only what awaits confirmation; cancel only what has not finished; refund
+ * a positive amount only of what was captured and not yet refunded; a key
+ * answers from its first call and refuses any other request, and a zero
+ * amount is refused before the key is looked at.
  */
 final class FakeLedgerMachine
 {
@@ -164,6 +165,13 @@ final class FakeLedgerMachine
             idempotencyKey: $key,
         ));
 
+        // Parameter validation comes before the key is even looked at.
+        if ($amount === 0) {
+            $this->expectFailure($call, PaymentException::class, 'capture refused');
+
+            return;
+        }
+
         if ($this->answeredByKey(operation: 'capture', request: $amount, key: $key, call: $call)) {
             return;
         }
@@ -245,6 +253,12 @@ final class FakeLedgerMachine
             amount: $amount === null ? null : new Money(minorUnits: $amount, currency: self::CURRENCY),
             idempotencyKey: $key,
         ));
+
+        if ($amount === 0) {
+            $this->expectFailure($call, PaymentException::class, 'refund refused');
+
+            return;
+        }
 
         if ($this->answeredByKey(operation: 'refund', request: $amount, key: $key, call: $call)) {
             return;

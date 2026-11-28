@@ -64,6 +64,12 @@ full amount captured when it is `Succeeded`, zero otherwise.
 | `cancelPayment()` | any state but `Succeeded`, `Failed`, `Canceled` | `Canceled` | `PaymentException` |
 | `createRefund()` | `Succeeded`; same currency; up to `capturedAmount` less earlier refunds (without an amount: the rest) | refund `Succeeded` | `RefundFailedException` |
 
+A zero capture or refund amount is refused with a plain `PaymentException`
+before the key is looked at, so the key stays free: it is parameter validation,
+for which a provider saves nothing. A refund amount must be "a positive
+integer" (https://docs.stripe.com/api/refunds/create); Stripe names no minimum
+for a capture, and refusing a zero one is this fake's choice.
+
 A capture never changes `amount`: it stays the created (authorized) amount,
 and `capturedAmount` reports what was taken, so a partial capture of 700 on
 1 200 leaves 700 refundable.

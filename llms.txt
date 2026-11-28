@@ -27,7 +27,8 @@ confirm only from `Pending`/`RequiresAction` → `RequiresCapture` (manual
 capture) or `Succeeded`; cancel from anything but
 `Succeeded`/`Failed`/`Canceled` → `Canceled`. Refunds (`RefundFailedException`)
 only of `Succeeded`, same currency, ≤ `capturedAmount` − earlier refunds (no
-amount = the rest). `simulateTransition(PaymentReference, PaymentState,
+amount = the rest). A zero capture or refund amount → plain `PaymentException`
+before the key is looked at (validation; the key stays free). `simulateTransition(PaymentReference, PaymentState,
 ?OperationId)` on every fake moves a payment as the provider would without an
 API call (3DS done, deferred payment paid); only `canTransitionTo()` moves,
 else `InvalidArgumentException`; `Succeeded` with nothing captured captures

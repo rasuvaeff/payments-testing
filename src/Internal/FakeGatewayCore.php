@@ -34,10 +34,10 @@ use Rasuvaeff\PaymentsTesting\FakeGatewayConfig;
  *
  * | Operation | Allowed from | Result |
  * |---|---|---|
- * | capture | `RequiresCapture` | `Succeeded`, `capturedAmount` = the captured amount |
+ * | capture | `RequiresCapture`, a positive amount | `Succeeded`, `capturedAmount` = the captured amount |
  * | confirm | `Pending`, `RequiresAction` | `RequiresCapture` (manual capture) or `Succeeded` |
  * | cancel | every state but `Succeeded`, `Failed`, `Canceled` | `Canceled` |
- * | refund | `Succeeded`, up to `capturedAmount` minus earlier refunds | refund `Succeeded` |
+ * | refund | `Succeeded`, a positive amount up to `capturedAmount` minus earlier refunds | refund `Succeeded` |
  *
  * Idempotency keys share one space across operations: a key is answered
  * from its first response when the request is the same, and refused with
@@ -120,6 +120,7 @@ final class FakeGatewayCore
     public function capturePayment(CapturePaymentRequest $request): PaymentAttempt
     {
         $stored = $this->payment($request->payment);
+        $this->assertPositive(amount: $request->amount, operation: 'capture');
         $amount = $request->amount ?? $stored->amount;
         // The request's own amount: an omitted amount and the full amount
         // named explicitly are different requests to a provider.
@@ -220,6 +221,7 @@ final class FakeGatewayCore
     public function createRefund(CreateRefundRequest $request): RefundAttempt
     {
         $payment = $this->payment($request->payment);
+        $this->assertPositive(amount: $request->amount, operation: 'refund');
         $fingerprint = $this->fingerprint([
             $payment->payment->id,
             $request->amount?->minorUnits,
@@ -264,6 +266,22 @@ final class FakeGatewayCore
             $request->captureMethod === CaptureMethod::Manual => PaymentState::RequiresCapture,
             default => PaymentState::Succeeded,
         };
+    }
+
+    /**
+     * Parameter validation, refused before the idempotency layer looks at the
+     * key — a provider saves nothing for it. A refund amount must be "a
+     * positive integer" (https://docs.stripe.com/api/refunds/create); Stripe
+     * names no minimum for a capture, and refusing a zero one, which captures
+     * nothing, is this fake's choice.
+     *
+     * @param non-empty-string $operation
+     */
+    private function assertPositive(?Money $amount, string $operation): void
+    {
+        if ($amount instanceof Money && $amount->isZero()) {
+            throw new PaymentException(message: \sprintf('Fake %s amount must be positive', $operation));
+        }
     }
 
     /**

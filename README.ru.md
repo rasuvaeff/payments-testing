@@ -66,6 +66,13 @@ Fakes ведут себя как провайдер, детерминирова�
 | `cancelPayment()` | любое состояние, кроме `Succeeded`, `Failed`, `Canceled` | `Canceled` | `PaymentException` |
 | `createRefund()` | `Succeeded`; та же валюта; не больше `capturedAmount` за вычетом прошлых возвратов (без суммы — весь остаток) | возврат `Succeeded` | `RefundFailedException` |
 
+Нулевая сумма capture или возврата отклоняется простым `PaymentException` ещё
+до того, как смотрится ключ, поэтому ключ остаётся свободным: это проверка
+параметров, для которой провайдер ничего не сохраняет. Сумма возврата должна
+быть «a positive integer» (https://docs.stripe.com/api/refunds/create); минимума
+для capture Stripe не называет, и отказ в нулевом — собственный выбор этого
+fake.
+
 Capture никогда не меняет `amount`: это остаётся созданная (авторизованная)
 сумма, а `capturedAmount` сообщает, сколько списано, так что после частичного
 capture 700 из 1 200 вернуть можно 700.

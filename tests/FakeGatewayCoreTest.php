@@ -304,6 +304,46 @@ final class FakeGatewayCoreTest
         $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 1_200, currency: 'EUR')));
     }
 
+    /**
+     * A refund amount must be "a positive integer"
+     * (https://docs.stripe.com/api/refunds/create). Stripe documents no
+     * minimum for `amount_to_capture`; refusing a zero capture is the fake's
+     * own choice, since it captures nothing. Both are parameter validation,
+     * which a provider rejects before the idempotency layer saves anything,
+     * so the key stays free.
+     */
+    public function refusesAZeroCaptureBeforeTheKey(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
+
+        try {
+            $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 0, currency: 'EUR')));
+            Assert::fail('A zero capture must be refused');
+        } catch (PaymentException $refused) {
+            Assert::same($refused::class, PaymentException::class);
+            Assert::same($refused->getMessage(), 'Fake capture amount must be positive');
+        }
+
+        $captured = $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 700, currency: 'EUR')));
+        Assert::same($captured->capturedAmount?->minorUnits, 700);
+    }
+
+    public function refusesAZeroRefundBeforeTheKey(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+
+        try {
+            $this->core->createRefund($this->refund($payment, new Money(minorUnits: 0, currency: 'EUR'), 'refund-1', 'refund-key'));
+            Assert::fail('A zero refund must be refused');
+        } catch (PaymentException $refused) {
+            Assert::same($refused::class, PaymentException::class);
+            Assert::same($refused->getMessage(), 'Fake refund amount must be positive');
+        }
+
+        $refund = $this->core->createRefund($this->refund($payment, null, 'refund-2', 'refund-key'));
+        Assert::same($refund->requestedAmount->minorUnits, 1_200);
+    }
+
     public function refusesTheCreateKeyForARefund(): void
     {
         $payment = $this->core->createPayment(Fixtures::createPayment(idempotencyKey: 'create-key'))->payment;
