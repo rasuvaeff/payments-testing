@@ -62,7 +62,7 @@ full amount captured when it is `Succeeded`, zero otherwise.
 | `capturePayment()` | `RequiresCapture`; up to `amount`, same currency | `Succeeded`, `capturedAmount` = the captured amount (`amount` without one) | `PaymentException` |
 | `confirmPayment()` | `Pending`, `RequiresAction` | `RequiresCapture` for a manual-capture payment, `Succeeded` otherwise | `PaymentException` |
 | `cancelPayment()` | any state but `Succeeded`, `Failed`, `Canceled` | `Canceled` | `PaymentException` |
-| `createRefund()` | `Succeeded`; same currency; up to `capturedAmount` less earlier refunds (without an amount: the rest) | refund `Succeeded` | `RefundFailedException` |
+| `createRefund()` | `Succeeded`; same currency; up to `capturedAmount` less earlier refunds (without an amount: the rest); only the whole rest without `PartialRefundCapability`; at most `maximumRefunds` refunds | refund `Succeeded` | `RefundFailedException` |
 
 A zero capture or refund amount is refused with a plain `PaymentException`
 before the key is looked at, so the key stays free: it is parameter validation,
@@ -149,7 +149,13 @@ $gateway = new FakeRefundGateway(config: new FakeGatewayConfig(
 ```
 
 `PartialRefundCapability` in the capability set of a non-refund fake throws
-`InvalidArgumentException` — capabilities must stay truthful.
+`InvalidArgumentException` — capabilities must stay truthful. A
+`FakeRefundGateway` honours the set like a provider would: without
+`PartialRefundCapability` (the default, `CapabilitySet::of()`) it refunds only
+the whole remaining amount — one full refund per payment — and a smaller
+amount throws `RefundFailedException`; with `maximumRefunds` it refuses the
+refund after the last allowed one. Configure partial refunds as above to
+refund in parts.
 
 ### Contract assertions
 

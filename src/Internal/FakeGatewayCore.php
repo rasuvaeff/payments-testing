@@ -12,6 +12,7 @@ use Rasuvaeff\Payments\CreateRefundRequest;
 use Rasuvaeff\Payments\IdempotencyConflictException;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
+use Rasuvaeff\Payments\PartialRefundCapability;
 use Rasuvaeff\Payments\PaymentAttempt;
 use Rasuvaeff\Payments\PaymentException;
 use Rasuvaeff\Payments\PaymentMethodReference;
@@ -37,7 +38,7 @@ use Rasuvaeff\PaymentsTesting\FakeGatewayConfig;
  * | capture | `RequiresCapture`, a positive amount | `Succeeded`, `capturedAmount` = the captured amount |
  * | confirm | `Pending`, `RequiresAction` | `RequiresCapture` (manual capture) or `Succeeded` |
  * | cancel | every state but `Succeeded`, `Failed`, `Canceled` | `Canceled` |
- * | refund | `Succeeded`, a positive amount up to `capturedAmount` minus earlier refunds | refund `Succeeded` |
+ * | refund | `Succeeded`, a positive amount up to `capturedAmount` minus earlier refunds (all of it without `PartialRefundCapability`, at most `maximumRefunds` refunds) | refund `Succeeded` |
  *
  * Idempotency keys share one space across operations: a key is answered
  * from its first response — a refusal included — when the request is the
@@ -57,6 +58,8 @@ final class FakeGatewayCore
     private array $captureMethods = [];
     /** @var array<string, int<0, max>> */
     private array $refunded = [];
+    /** @var array<string, int<0, max>> */
+    private array $refundCounts = [];
     /** @var array<string, RefundAttempt> */
     private array $refunds = [];
     /** @var array<string, IdempotencyEntry> */
@@ -243,6 +246,7 @@ final class FakeGatewayCore
             $attempt = $this->refundAttempt($request->operationId, $reference, $payment->payment, $amount, $this->config->now);
             $this->refunds[$id] = $attempt;
             $this->refunded[$payment->payment->id] = ($this->refunded[$payment->payment->id] ?? 0) + $amount->minorUnits;
+            $this->refundCounts[$payment->payment->id] = ($this->refundCounts[$payment->payment->id] ?? 0) + 1;
 
             return $attempt;
         });
@@ -299,6 +303,9 @@ final class FakeGatewayCore
      * A provider refuses a refund it cannot honour: of a payment that was
      * never paid, in another currency, or above what was captured less
      * earlier refunds. Without an amount it refunds the remaining balance.
+     * The capability set is the gateway's word on the rest: without
+     * `PartialRefundCapability` only the whole remaining amount is refunded,
+     * and `maximumRefunds` caps the refunds of one payment.
      */
     private function refundableAmount(PaymentAttempt $payment, ?Money $requested): Money
     {
@@ -319,12 +326,23 @@ final class FakeGatewayCore
             throw new RefundFailedException(message: 'Fake payment has no refundable balance left');
         }
 
+        $partial = $this->config->capabilities->get(PartialRefundCapability::class);
+        $maximum = $partial instanceof PartialRefundCapability ? $partial->maximumRefunds : null;
+
+        if ($maximum !== null && ($this->refundCounts[$payment->payment->id] ?? 0) >= $maximum) {
+            throw new RefundFailedException(message: \sprintf('Fake payment reached the maximum of %d refunds', $maximum));
+        }
+
         if (!$requested instanceof Money) {
             return $balance;
         }
 
         if ($requested->isGreaterThan($balance)) {
             throw new RefundFailedException(message: 'Refund amount exceeds the refundable balance of the fake payment');
+        }
+
+        if (!$partial instanceof PartialRefundCapability && !$requested->equals($balance)) {
+            throw new RefundFailedException(message: 'Fake gateway refunds only the whole remaining amount without PartialRefundCapability');
         }
 
         return $requested;

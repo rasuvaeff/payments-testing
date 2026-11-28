@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Rasuvaeff\PaymentsTesting\Tests;
 
+use Rasuvaeff\Payments\CapabilitySet;
 use Rasuvaeff\Payments\CaptureMethod;
 use Rasuvaeff\Payments\CapturePaymentRequest;
 use Rasuvaeff\Payments\ConfirmationMethod;
@@ -13,6 +14,7 @@ use Rasuvaeff\Payments\CustomerReference;
 use Rasuvaeff\Payments\IdempotencyConflictException;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
+use Rasuvaeff\Payments\PartialRefundCapability;
 use Rasuvaeff\Payments\PaymentException;
 use Rasuvaeff\Payments\PaymentMethodReference;
 use Rasuvaeff\Payments\PaymentOperationRequest;
@@ -74,7 +76,8 @@ final class FakeGatewayCoreTest
     #[BeforeTest]
     public function setUp(): void
     {
-        $this->core = new FakeGatewayCore(new FakeGatewayConfig());
+        // Most cases refund in parts; the gateway must say it can.
+        $this->core = new FakeGatewayCore(new FakeGatewayConfig(capabilities: CapabilitySet::of(new PartialRefundCapability())));
     }
 
     public function derivesPaymentReferencesFromOperationAndSequence(): void
@@ -342,6 +345,59 @@ final class FakeGatewayCoreTest
 
         $refund = $this->core->createRefund($this->refund($payment, null, 'refund-2', 'refund-key'));
         Assert::same($refund->requestedAmount->minorUnits, 1_200);
+    }
+
+    /**
+     * Without `PartialRefundCapability` the gateway says it refunds only in
+     * full, and the fake holds it to that: a refund of less than the whole
+     * captured amount is refused, a full one goes through once.
+     */
+    public function refusesAPartialRefundWithoutTheCapability(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig());
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+
+        try {
+            $core->createRefund($this->refund($payment, new Money(minorUnits: 300, currency: 'EUR')));
+            Assert::fail('A partial refund must be refused without the capability');
+        } catch (RefundFailedException $refused) {
+            Assert::same($refused->getMessage(), 'Fake gateway refunds only the whole remaining amount without PartialRefundCapability');
+        }
+
+        $full = $core->createRefund($this->refund($payment, new Money(minorUnits: 1_200, currency: 'EUR'), 'refund-2'));
+        Assert::same($full->requestedAmount->minorUnits, 1_200);
+
+        Expect::exception(RefundFailedException::class)->withMessage('Fake payment has no refundable balance left');
+        $core->createRefund($this->refund($payment, null, 'refund-3'));
+    }
+
+    /**
+     * `maximumRefunds` caps how many refunds one payment takes.
+     */
+    public function refusesARefundBeyondTheMaximumCount(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(capabilities: CapabilitySet::of(new PartialRefundCapability(maximumRefunds: 2))));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+        $core->createRefund($this->refund($payment, new Money(minorUnits: 100, currency: 'EUR'), 'refund-1'));
+        $core->createRefund($this->refund($payment, new Money(minorUnits: 100, currency: 'EUR'), 'refund-2'));
+
+        Expect::exception(RefundFailedException::class)->withMessage('Fake payment reached the maximum of 2 refunds');
+        $core->createRefund($this->refund($payment, new Money(minorUnits: 100, currency: 'EUR'), 'refund-3'));
+    }
+
+    /**
+     * A replayed refund is not a new one: it does not count against
+     * `maximumRefunds`.
+     */
+    public function aReplayedRefundDoesNotCountTowardsTheMaximum(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(capabilities: CapabilitySet::of(new PartialRefundCapability(maximumRefunds: 2))));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+        $core->createRefund($this->refund($payment, new Money(minorUnits: 100, currency: 'EUR'), 'refund-1', 'refund-key'));
+        $core->createRefund($this->refund($payment, new Money(minorUnits: 100, currency: 'EUR'), 'refund-2', 'refund-key'));
+
+        $second = $core->createRefund($this->refund($payment, new Money(minorUnits: 100, currency: 'EUR'), 'refund-3'));
+        Assert::same($second->requestedAmount->minorUnits, 100);
     }
 
     public function refusesTheCreateKeyForARefund(): void
@@ -867,13 +923,14 @@ final class FakeGatewayCoreTest
      * ungated capture and cancel of 0.1.x each fail this within a few steps.
      *
      * @param value-of<FakeLedgerMachine::SCENARIOS> $scenario
+     * @param value-of<FakeLedgerMachine::REFUND_POLICIES> $refunds
      */
     #[Property(runs: 500)]
-    public function ledgerAgreesWithAProviderModel(string $scenario, RuleSequence $sequence): void
+    public function ledgerAgreesWithAProviderModel(string $scenario, string $refunds, RuleSequence $sequence): void
     {
         $machine = null;
-        $sequence->run(static function () use (&$machine, $scenario): FakeLedgerMachine {
-            return $machine = new FakeLedgerMachine($scenario);
+        $sequence->run(static function () use (&$machine, $scenario, $refunds): FakeLedgerMachine {
+            return $machine = new FakeLedgerMachine($scenario, $refunds);
         });
         \assert($machine instanceof FakeLedgerMachine);
 
@@ -896,6 +953,7 @@ final class FakeGatewayCoreTest
                 [1, Gen::constant('requires action')],
                 [1, Gen::constant('deferred')],
             ]),
+            'refunds' => Gen::elements(FakeLedgerMachine::REFUND_POLICIES),
             'sequence' => Gen::rules(FakeLedgerMachine::class, minLength: 0, maxLength: 25),
         ];
     }

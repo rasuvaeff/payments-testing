@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Rasuvaeff\PaymentsTesting\Tests\Support;
 
+use Rasuvaeff\Payments\CapabilitySet;
 use Rasuvaeff\Payments\CaptureMethod;
 use Rasuvaeff\Payments\CapturePaymentRequest;
 use Rasuvaeff\Payments\ConfirmationMethod;
@@ -12,6 +13,7 @@ use Rasuvaeff\Payments\CreateRefundRequest;
 use Rasuvaeff\Payments\IdempotencyConflictException;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
+use Rasuvaeff\Payments\PartialRefundCapability;
 use Rasuvaeff\Payments\PaymentAttempt;
 use Rasuvaeff\Payments\PaymentException;
 use Rasuvaeff\Payments\PaymentMethodReference;
@@ -20,7 +22,9 @@ use Rasuvaeff\Payments\PaymentReference;
 use Rasuvaeff\Payments\PaymentState;
 use Rasuvaeff\Payments\RefundAttempt;
 use Rasuvaeff\Payments\RefundFailedException;
+use Rasuvaeff\Payments\RefundReference;
 use Rasuvaeff\Payments\RetrievePaymentRequest;
+use Rasuvaeff\Payments\RetrieveRefundRequest;
 use Rasuvaeff\PaymentsTesting\FakeGatewayConfig;
 use Rasuvaeff\PaymentsTesting\Internal\FakeGatewayCore;
 use Rasuvaeff\PropertyTesting\ArbitraryInterface;
@@ -47,6 +51,12 @@ use Testo\Assert;
 final class FakeLedgerMachine
 {
     public const array SCENARIOS = ['paid', 'authorized', 'confirm', 'confirm and capture', 'requires action', 'deferred'];
+
+    /**
+     * What the gateway's capability set says about refunds: none partial,
+     * partial without a limit, partial up to two per payment.
+     */
+    public const array REFUND_POLICIES = ['full only', 'partial', 'at most 2'];
 
     private const int AUTHORIZED = 1_000;
     private const string CURRENCY = 'EUR';
@@ -84,6 +94,9 @@ final class FakeLedgerMachine
     private int $refunded = 0;
     private int $operation = 0;
 
+    /** @var list<RefundReference> */
+    private array $refundReferences = [];
+
     /**
      * What each key was first used for and what it answered.
      *
@@ -98,8 +111,9 @@ final class FakeLedgerMachine
 
     /**
      * @param value-of<self::SCENARIOS> $scenario
+     * @param value-of<self::REFUND_POLICIES> $refunds
      */
-    public function __construct(string $scenario)
+    public function __construct(string $scenario, private readonly string $refunds = 'partial')
     {
         $this->manualCapture = \in_array($scenario, ['authorized', 'confirm and capture'], strict: true);
         $this->state = match ($scenario) {
@@ -112,6 +126,11 @@ final class FakeLedgerMachine
         $this->observed = $this->state;
         $this->captured = $this->state === PaymentState::Succeeded ? self::AUTHORIZED : 0;
         $this->core = new FakeGatewayCore(new FakeGatewayConfig(
+            capabilities: match ($refunds) {
+                'full only' => CapabilitySet::of(),
+                'partial' => CapabilitySet::of(new PartialRefundCapability()),
+                'at most 2' => CapabilitySet::of(new PartialRefundCapability(maximumRefunds: 2)),
+            },
             createState: $scenario === 'requires action' ? PaymentState::RequiresAction : null,
         ));
         $this->create = new CreatePaymentRequest(
@@ -275,10 +294,23 @@ final class FakeLedgerMachine
             return;
         }
 
+        if ($this->refunds === 'at most 2' && \count($this->refundReferences) === 2) {
+            $this->refused($call, RefundFailedException::class, 'refund refused at the maximum', 'refund', $amount, $key);
+
+            return;
+        }
+
+        if ($this->refunds === 'full only' && $amount !== null && $amount !== $balance) {
+            $this->refused($call, RefundFailedException::class, 'refund refused as partial', 'refund', $amount, $key);
+
+            return;
+        }
+
         $refund = $call();
         $refunded = $amount ?? $balance;
         Assert::same($refund->requestedAmount->minorUnits, $refunded);
         $this->refunded += $refunded;
+        $this->refundReferences[] = $refund->refund;
         $this->seen['refund accepted'] = true;
 
         if ($key !== null) {
@@ -376,11 +408,32 @@ final class FakeLedgerMachine
         Assert::same($current->capturedAmount?->minorUnits, $this->captured);
     }
 
+    /**
+     * Read from the fake, not from the model: every refund it reports, summed,
+     * stays within the gross amount it reports as captured, which a refund
+     * never lowers and which stays within the authorization; and the payment
+     * has no more refunds than the capability allows.
+     */
     #[Invariant]
     public function moneyStaysWithinWhatWasTaken(): void
     {
-        Assert::true($this->captured <= self::AUTHORIZED);
-        Assert::true($this->refunded <= $this->captured);
+        $captured = $this->core->retrievePayment(new RetrievePaymentRequest(
+            operationId: $this->operationId(),
+            payment: $this->payment,
+        ))->capturedAmount?->minorUnits ?? 0;
+        $refunded = 0;
+
+        foreach ($this->refundReferences as $reference) {
+            $refunded += $this->core->retrieveRefund(new RetrieveRefundRequest(
+                operationId: $this->operationId(),
+                refund: $reference,
+            ))->actualAmount?->minorUnits ?? 0;
+        }
+
+        Assert::true($captured <= self::AUTHORIZED);
+        Assert::true($refunded <= $captured);
+        Assert::true($this->refunds !== 'at most 2' || \count($this->refundReferences) <= 2);
+        Assert::true($this->refunds !== 'full only' || \count($this->refundReferences) <= 1);
     }
 
     /**

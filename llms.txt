@@ -65,6 +65,10 @@ $gateway->simulateTransition($attempt->payment, PaymentState::Succeeded); // Pay
   `retrieveRefund(RetrieveRefundRequest): RefundAttempt`
 - `PartialRefundCapability` in config of a non-refund fake →
   `InvalidArgumentException`.
+- `FakeRefundGateway` honours the capability set: without
+  `PartialRefundCapability` (default `CapabilitySet::of()`) only the whole
+  remaining amount is refunded (a smaller amount → `RefundFailedException`);
+  `maximumRefunds` caps refunds per payment (a replay does not count).
 
 ## Contract assertions
 

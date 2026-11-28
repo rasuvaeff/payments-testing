@@ -64,7 +64,7 @@ Fakes ведут себя как провайдер, детерминирова�
 | `capturePayment()` | `RequiresCapture`; не больше `amount`, та же валюта | `Succeeded`, `capturedAmount` = захваченная сумма (`amount`, если суммы нет) | `PaymentException` |
 | `confirmPayment()` | `Pending`, `RequiresAction` | `RequiresCapture` для платежа с ручным capture, иначе `Succeeded` | `PaymentException` |
 | `cancelPayment()` | любое состояние, кроме `Succeeded`, `Failed`, `Canceled` | `Canceled` | `PaymentException` |
-| `createRefund()` | `Succeeded`; та же валюта; не больше `capturedAmount` за вычетом прошлых возвратов (без суммы — весь остаток) | возврат `Succeeded` | `RefundFailedException` |
+| `createRefund()` | `Succeeded`; та же валюта; не больше `capturedAmount` за вычетом прошлых возвратов (без суммы — весь остаток); без `PartialRefundCapability` — только весь остаток; не больше `maximumRefunds` возвратов | возврат `Succeeded` | `RefundFailedException` |
 
 Нулевая сумма capture или возврата отклоняется простым `PaymentException` ещё
 до того, как смотрится ключ, поэтому ключ остаётся свободным: это проверка
@@ -154,6 +154,12 @@ $gateway = new FakeRefundGateway(config: new FakeGatewayConfig(
 
 `PartialRefundCapability` в capability set у fake без refund бросает
 `InvalidArgumentException` — capabilities обязаны оставаться правдивыми.
+`FakeRefundGateway` соблюдает набор так же, как провайдер: без
+`PartialRefundCapability` (по умолчанию, `CapabilitySet::of()`) он возвращает
+только весь остаток — один полный возврат на платёж — а меньшая сумма бросает
+`RefundFailedException`; с `maximumRefunds` он отказывает в возврате после
+последнего разрешённого. Чтобы возвращать по частям, настройте частичные
+возвраты, как выше.
 
 ### Contract assertions
 
