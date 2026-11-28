@@ -17,6 +17,7 @@ use Rasuvaeff\PaymentsTesting\CancelGatewayAssertions;
 use Rasuvaeff\PaymentsTesting\CaptureGatewayAssertions;
 use Rasuvaeff\PaymentsTesting\ConfirmGatewayAssertions;
 use Rasuvaeff\PaymentsTesting\ContractViolationException;
+use Rasuvaeff\PaymentsTesting\Internal\KeyReuseProbe;
 use Rasuvaeff\PaymentsTesting\RefundGatewayAssertions;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -28,6 +29,7 @@ use Testo\Test;
 #[Covers(ConfirmGatewayAssertions::class)]
 #[Covers(CancelGatewayAssertions::class)]
 #[Covers(RefundGatewayAssertions::class)]
+#[Covers(KeyReuseProbe::class)]
 final class OptionalGatewayAssertionsTest
 {
     public function acceptsOptionalPaymentOperations(): void
@@ -48,7 +50,8 @@ final class OptionalGatewayAssertionsTest
             new PaymentOperationRequest(new OperationId('cancel-1'), $payment),
         );
 
-        Assert::same($captured->amount->minorUnits, 50);
+        Assert::same($captured->amount->minorUnits, 100);
+        Assert::same($captured->capturedAmount?->minorUnits, 50);
         Assert::same($captured->payment->id, 'capture_capture-1');
         Assert::same($captured->payment->kind, 'capture');
         Assert::same($confirmed->payment, $payment);
@@ -80,7 +83,7 @@ final class OptionalGatewayAssertionsTest
 
         Expect::exception(ContractViolationException::class)
             ->withMessage('A different idempotency key returned the original refund reference');
-        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, self::keyedRefund());
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, $this->keyedRefund());
     }
 
     public function detectsRefundGatewayAcceptingKeyReuse(): void
@@ -89,7 +92,7 @@ final class OptionalGatewayAssertionsTest
 
         Expect::exception(ContractViolationException::class)
             ->withMessage('Reusing a refund idempotency key with a different request was accepted');
-        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, self::keyedRefund());
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, $this->keyedRefund());
     }
 
     public function refusesRefundIdempotencyAssertionWithoutAKey(): void
@@ -117,7 +120,7 @@ final class OptionalGatewayAssertionsTest
         Assert::same($gateway->refundsReceived, [
             ['refund-key', 25],
             ['refund-key', 25],
-            ['refund-key-contract-other', 25],
+            ['contract-other-92d8334b701afc93', 25],
             ['refund-key', 24],
         ]);
     }
@@ -141,12 +144,26 @@ final class OptionalGatewayAssertionsTest
         Assert::same($gateway->refundsReceived, [
             ['refund-key', 1],
             ['refund-key', 1],
-            ['refund-key-contract-other', 1],
+            ['contract-other-92d8334b701afc93', 1],
             ['refund-key', 2],
         ]);
     }
 
-    private static function keyedRefund(): CreateRefundRequest
+    public function probesALongRefundKeyWithAKeyThatFits(): void
+    {
+        $gateway = new FixtureGateway();
+        $key = str_repeat('r', 250);
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, new CreateRefundRequest(
+            operationId: new OperationId('refund-1'),
+            payment: new PaymentReference($gateway->provider(), 'pay_1'),
+            amount: new Money(25, 'EUR'),
+            idempotencyKey: $key,
+        ));
+
+        Assert::same(\array_column($gateway->refundsReceived, 0), [$key, $key, 'contract-other-' . substr(hash('sha256', $key), 0, 16), $key]);
+    }
+
+    private function keyedRefund(): CreateRefundRequest
     {
         return new CreateRefundRequest(
             operationId: new OperationId('refund-1'),

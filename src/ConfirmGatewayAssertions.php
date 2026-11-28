@@ -30,5 +30,30 @@ final class ConfirmGatewayAssertions
         return $attempt;
     }
 
+    /**
+     * A replayed confirm must be answered from the first one: the same
+     * state, without running the operation again (each call is also checked
+     * by assertConfirmPayment(), so both carry the requested payment
+     * reference). The key reused for another payment is not probed — that
+     * needs a second payment.
+     */
+    public static function assertConfirmPaymentIdempotency(
+        PaymentGatewayInterface&ConfirmGatewayInterface $gateway,
+        PaymentOperationRequest $request,
+    ): PaymentAttempt {
+        if ($request->idempotencyKey === null) {
+            throw new \InvalidArgumentException('Idempotency assertion requires an idempotency key');
+        }
+
+        $first = self::assertConfirmPayment($gateway, $request);
+        $second = self::assertConfirmPayment($gateway, $request);
+
+        if ($second->state !== $first->state) {
+            throw new ContractViolationException('A replayed confirm reported another state');
+        }
+
+        return $second;
+    }
+
     private function __construct() {}
 }

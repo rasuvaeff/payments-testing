@@ -13,6 +13,7 @@ use Rasuvaeff\Payments\PaymentGatewayInterface;
 use Rasuvaeff\Payments\RefundGatewayInterface;
 use Rasuvaeff\Payments\RetrievePaymentRequest;
 use Rasuvaeff\PaymentsTesting\Internal\AttemptAssertions;
+use Rasuvaeff\PaymentsTesting\Internal\KeyReuseProbe;
 
 /**
  * @api
@@ -59,16 +60,11 @@ final class PaymentGatewayAssertions
     public static function assertCreatePaymentIdempotency(PaymentGatewayInterface $gateway, CreatePaymentRequest $request): PaymentAttempt
     {
         $key = $request->idempotencyKey;
-
-        if ($key === null) {
-            throw new \InvalidArgumentException('Idempotency assertion requires an idempotency key');
-        }
-
         $first = self::assertCreatePayment($gateway, $request);
         $second = self::assertCreatePayment($gateway, $request);
         AttemptAssertions::same($second->payment, $first->payment, 'Payment idempotency key produced another reference');
 
-        $otherKey = self::assertCreatePayment($gateway, self::withKey(request: $request, key: $key . '-contract-other'));
+        $otherKey = self::assertCreatePayment($gateway, self::withKey(request: $request, key: KeyReuseProbe::otherKey($key)));
 
         if ($otherKey->payment->id === $first->payment->id) {
             throw new ContractViolationException('A different idempotency key returned the original payment reference');
@@ -110,9 +106,7 @@ final class PaymentGatewayAssertions
             idempotencyKey: $key,
         );
 
-        try {
-            $gateway->createPayment($conflicting);
-        } catch (\Throwable) {
+        if (KeyReuseProbe::refused(static fn(): PaymentAttempt => $gateway->createPayment($conflicting))) {
             return;
         }
 

@@ -11,6 +11,7 @@ use Rasuvaeff\Payments\RefundAttempt;
 use Rasuvaeff\Payments\RefundGatewayInterface;
 use Rasuvaeff\Payments\RetrieveRefundRequest;
 use Rasuvaeff\PaymentsTesting\Internal\AttemptAssertions;
+use Rasuvaeff\PaymentsTesting\Internal\KeyReuseProbe;
 
 /**
  * @api
@@ -47,7 +48,7 @@ final class RefundGatewayAssertions
         $second = self::assertCreateRefund($gateway, $request);
         AttemptAssertions::same($second->refund, $first->refund, 'Refund idempotency key produced another reference');
 
-        $otherKey = self::assertCreateRefund($gateway, self::withKey(request: $request, key: $key . '-contract-other'));
+        $otherKey = self::assertCreateRefund($gateway, self::withKey(request: $request, key: KeyReuseProbe::otherKey($key)));
 
         if ($otherKey->refund->id === $first->refund->id) {
             throw new ContractViolationException('A different idempotency key returned the original refund reference');
@@ -85,9 +86,7 @@ final class RefundGatewayAssertions
             idempotencyKey: $key,
         );
 
-        try {
-            $gateway->createRefund($conflicting);
-        } catch (\Throwable) {
+        if (KeyReuseProbe::refused(static fn(): RefundAttempt => $gateway->createRefund($conflicting))) {
             return;
         }
 

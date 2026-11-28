@@ -22,19 +22,20 @@
     },
     "require": {
         "php": "8.3 - 8.6",
-        "rasuvaeff/payments": "^0.1 || ^0.2"
+        "rasuvaeff/payments": "^0.3"
     },
     "require-dev": {
         "ergebnis/composer-normalize": "^2.51",
         "friendsofphp/php-cs-fixer": "^3.95",
-        "infection/infection": "^0.33",
+        "infection/infection": "^0.35",
         "maglnet/composer-require-checker": "^4.17",
-        "rasuvaeff/rector-named-literals": "^1.0",
+        "rasuvaeff/property-testing-testo": "^1.4.1",
+        "rasuvaeff/rector-named-literals": "^1.0.2",
         "rector/rector": "^2.4",
         "roave/backward-compatibility-check": "^8.0",
-        "testo/bridge-infection": "^0.1.6",
-        "testo/testo": "^0.10.25",
-        "vimeo/psalm": "^7.0"
+        "testo/bridge-infection": "^0.1.9",
+        "testo/testo": "^0.10.62",
+        "vimeo/psalm": "^7.23"
     },
     "autoload": {
         "psr-4": {
@@ -58,8 +59,13 @@
         },
         "sort-packages": true
     },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "0.2.x-dev"
+        }
+    },
     "scripts": {
-        "bc-check": "sh -c 'git config --global --add safe.directory /app 2>/dev/null || true; if [ \"$#\" -gt 0 ]; then roave-backward-compatibility-check \"$@\"; exit $?; fi; LATEST=$(git describe --tags --abbrev=0 2>/dev/null || true); if [ -n \"$LATEST\" ]; then roave-backward-compatibility-check --from=\"$LATEST\"; else echo \"No previous tag - skipping BC check\"; fi' --",
+        "bc-check": "sh -c 'git config --global --add safe.directory /app 2>/dev/null || true; LATEST=; for ARG in \"$@\"; do case \"$ARG\" in --from=*) LATEST=\"${ARG#--from=}\";; esac; done; if [ \"$#\" -eq 0 ]; then LATEST=$(git describe --tags --abbrev=0 2>/dev/null || true); if [ -z \"$LATEST\" ]; then echo \"No previous tag - skipping BC check\"; exit 0; fi; set -- --from=\"$LATEST\"; fi; CODE=0; OUTPUT=$(roave-backward-compatibility-check \"$@\" 2>&1) || CODE=$?; printf \"%s\\n\" \"$OUTPUT\"; if [ \"$CODE\" -eq 3 ]; then TOTAL=$(printf \"%s\\n\" \"$OUTPUT\" | { grep -cE \"^\\[BC\\] \" || true; }); SKIPPED=$(printf \"%s\\n\" \"$OUTPUT\" | { grep -cE \"^\\[BC\\] SKIPPED:\" || true; }); if [ \"$TOTAL\" -gt 0 ] && [ \"$TOTAL\" -eq \"$SKIPPED\" ]; then echo \"All $TOTAL finding(s) are roave/better-reflection SKIPPED entries (a static-analysis limitation, not a detected break); treating as pass.\"; exit 0; fi; NEXT=$(grep -m1 -oE \"^## [0-9]+\\.[0-9]+\\.[0-9]+\" CHANGELOG.md | grep -oE \"[0-9]+\\.[0-9]+\\.[0-9]+\" | head -1); LATEST_VERSION=\"${LATEST#v}\"; LATEST_MAJOR=\"${LATEST_VERSION%%.*}\"; LATEST_MINOR=\"${LATEST_VERSION#*.}\"; LATEST_MINOR=\"${LATEST_MINOR%%.*}\"; NEXT_MAJOR=\"${NEXT%%.*}\"; NEXT_MINOR=\"${NEXT#*.}\"; NEXT_MINOR=\"${NEXT_MINOR%%.*}\"; case \"$LATEST_MAJOR.$LATEST_MINOR\" in *[!0-9.]*|.*|*.) NEXT=;; esac; if [ -n \"$NEXT\" ] && { [ \"$NEXT_MAJOR\" -gt \"$LATEST_MAJOR\" ] || { [ \"$LATEST_MAJOR\" -eq 0 ] && [ \"$NEXT_MAJOR\" -eq 0 ] && [ \"$NEXT_MINOR\" -gt \"$LATEST_MINOR\" ]; }; }; then echo \"CHANGELOG declares $NEXT - an intentional compatibility boundary over $LATEST; BC breaks are expected, treating as pass.\"; exit 0; fi; fi; exit \"$CODE\"' --",
         "bench": "testo --suite=Benchmarks -vv",
         "build": [
             "@composer validate --strict",

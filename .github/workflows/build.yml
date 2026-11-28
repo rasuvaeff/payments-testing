@@ -98,7 +98,7 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: none
-          extensions: json
+          extensions: json, mbstring
           tools: composer:v2
 
       - name: Resolve the Composer cache directory
@@ -106,7 +106,7 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Composer dependencies
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: composer-${{ runner.os }}-${{ hashFiles('**/composer.json') }}
@@ -159,7 +159,7 @@ jobs:
         with:
           php-version: '8.3'
           coverage: none
-          extensions: json
+          extensions: json, mbstring
           tools: composer:v2
 
       - name: Resolve the Composer cache directory
@@ -167,7 +167,7 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Composer dependencies
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: composer-${{ runner.os }}-${{ hashFiles('**/composer.json') }}
@@ -196,7 +196,7 @@ jobs:
         with:
           php-version: '8.4'
           coverage: pcov
-          extensions: json
+          extensions: json, mbstring
           tools: composer:v2
 
       - name: Resolve the Composer cache directory
@@ -204,7 +204,7 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Composer dependencies
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: composer-${{ runner.os }}-${{ hashFiles('**/composer.json') }}
@@ -213,8 +213,24 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
+      - name: Restore property regression corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/property-db
+          key: property-db-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: property-db-
+
       - name: Test with coverage
+        env:
+          PROPERTY_DB: ${{ github.workspace }}/build/property-db
         run: composer test:coverage:ci
+
+      - name: Save property regression corpus
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/property-db
+          key: property-db-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Mutation testing
         run: composer mutation
@@ -239,7 +255,7 @@ jobs:
           # version is enough; 8.5 is the newest it installs on (~8.4 || ~8.5).
           php-version: '8.5'
           coverage: none
-          extensions: json, bcmath, intl
+          extensions: json, mbstring, bcmath, intl
           tools: composer:v2
 
       - name: Resolve the Composer cache directory
@@ -247,7 +263,7 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Composer dependencies
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: composer-${{ runner.os }}-${{ hashFiles('**/composer.json') }}
@@ -257,9 +273,11 @@ jobs:
         run: composer install --no-interaction --no-progress --prefer-dist
 
       - name: Backward compatibility check
-        # Real breaks pass only across an intended major bump: the top
-        # version heading in CHANGELOG.md declares a higher major than the
-        # latest tag. Minor/patch releases stay gated on a clean report.
+        # Real breaks pass only across an intended compatibility boundary
+        # declared by the top version heading in CHANGELOG.md: a higher major
+        # than the latest tag, or — while the package is on 0.x — a higher
+        # minor (a pre-1.0 break by SemVer). Patch releases stay gated on a
+        # clean report.
         #
         # A report made up ENTIRELY of "[BC] SKIPPED: ..." lines is also a
         # pass: SKIPPED means roave/better-reflection could not statically
@@ -284,14 +302,20 @@ jobs:
             exit 0
           fi
           NEXT="$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-          LATEST_MAJOR="${LATEST#v}"; LATEST_MAJOR="${LATEST_MAJOR%%.*}"
+          LATEST_VERSION="${LATEST#v}"
+          LATEST_MAJOR="${LATEST_VERSION%%.*}"
+          LATEST_MINOR="${LATEST_VERSION#*.}"; LATEST_MINOR="${LATEST_MINOR%%.*}"
           NEXT_MAJOR="${NEXT%%.*}"
+          NEXT_MINOR="${NEXT#*.}"; NEXT_MINOR="${NEXT_MINOR%%.*}"
           # Only code 3 means "breaks detected". Anything else is roave itself
           # failing (128 when it cannot clone or resolve the old tag), and a
           # crash must never be waved through by a CHANGELOG heading or a
           # SKIPPED-only report.
-          if [ "$CODE" -eq 3 ] && [ -n "$NEXT_MAJOR" ] && [ "$NEXT_MAJOR" -gt "$LATEST_MAJOR" ]; then
-            echo "CHANGELOG declares $NEXT - a new major over $LATEST; BC breaks are expected, treating as pass."
+          if [ "$CODE" -eq 3 ] && [ -n "$NEXT_MAJOR" ] && {
+            [ "$NEXT_MAJOR" -gt "$LATEST_MAJOR" ] ||
+            { [ "$LATEST_MAJOR" -eq 0 ] && [ "$NEXT_MAJOR" -eq 0 ] && [ "$NEXT_MINOR" -gt "$LATEST_MINOR" ]; }
+          }; then
+            echo "CHANGELOG declares $NEXT - an intentional compatibility boundary over $LATEST; BC breaks are expected, treating as pass."
             exit 0
           fi
           if [ "$CODE" -eq 3 ]; then

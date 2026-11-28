@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Rasuvaeff\PaymentsTesting\Tests;
 
+use Rasuvaeff\Payments\CaptureMethod;
+use Rasuvaeff\Payments\ConfirmationMethod;
 use Rasuvaeff\Payments\CreatePaymentRequest;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
@@ -17,6 +19,34 @@ final class Fixtures
             operationId: new OperationId(value: $operation),
             amount: new Money(minorUnits: 1_200, currency: 'EUR'),
             paymentMethod: new PaymentMethodReference(id: 'pm_1', kind: 'card'),
+            idempotencyKey: $idempotencyKey,
+        );
+    }
+
+    /**
+     * A manual-capture create: the fake answers it with `RequiresCapture`.
+     */
+    public static function authorizePayment(string $operation = 'operation-1', ?string $idempotencyKey = 'key-1'): CreatePaymentRequest
+    {
+        return new CreatePaymentRequest(
+            operationId: new OperationId(value: $operation),
+            amount: new Money(minorUnits: 1_200, currency: 'EUR'),
+            paymentMethod: new PaymentMethodReference(id: 'pm_1', kind: 'card'),
+            captureMethod: CaptureMethod::Manual,
+            idempotencyKey: $idempotencyKey,
+        );
+    }
+
+    /**
+     * A manual-confirmation create: the fake answers it with `Pending`.
+     */
+    public static function pendingPayment(string $operation = 'operation-1', ?string $idempotencyKey = 'key-1'): CreatePaymentRequest
+    {
+        return new CreatePaymentRequest(
+            operationId: new OperationId(value: $operation),
+            amount: new Money(minorUnits: 1_200, currency: 'EUR'),
+            paymentMethod: new PaymentMethodReference(id: 'pm_1', kind: 'card'),
+            confirmationMethod: ConfirmationMethod::Manual,
             idempotencyKey: $idempotencyKey,
         );
     }

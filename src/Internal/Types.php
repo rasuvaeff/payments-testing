@@ -10,8 +10,9 @@ namespace Rasuvaeff\PaymentsTesting\Internal;
  * @internal
  *
  * @psalm-type IdempotencyEntry = array{
+ *     operation: non-empty-string,
  *     fingerprint: non-empty-string,
- *     reference: non-empty-string
+ *     response: \Rasuvaeff\Payments\PaymentAttempt|\Rasuvaeff\Payments\RefundAttempt|\Rasuvaeff\Payments\PaymentException
  * }
  */
 final class Types

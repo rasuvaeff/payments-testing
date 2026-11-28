@@ -80,7 +80,8 @@ final class BrokenFixtureGateway implements
         return $this->paymentAttempt(
             $request->operationId,
             new PaymentReference($this->provider(), 'capture_1', 'capture'),
-            $request->amount ?? new Money(100, 'EUR'),
+            new Money(100, 'EUR'),
+            capturedAmount: $request->amount ?? new Money(100, 'EUR'),
         );
     }
 
@@ -123,6 +124,7 @@ final class BrokenFixtureGateway implements
         PaymentReference $reference,
         Money $amount,
         PaymentState $state = PaymentState::Succeeded,
+        ?Money $capturedAmount = null,
     ): PaymentAttempt {
         $now = new \DateTimeImmutable('2025-01-01T00:00:00+00:00');
 
@@ -136,6 +138,7 @@ final class BrokenFixtureGateway implements
             createdAt: $now,
             updatedAt: $now,
             requestInfo: new ProviderRequestInfo($now),
+            capturedAmount: $capturedAmount,
         );
     }
 

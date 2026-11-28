@@ -9,6 +9,11 @@ use Rasuvaeff\Payments\PaymentProvider;
 use Rasuvaeff\Payments\PaymentState;
 
 /**
+ * `createState` pins the state every created payment starts in. Left `null`,
+ * the fake answers a create the way a provider does: `RequiresPaymentMethod`
+ * without a payment method, `Pending` for manual confirmation,
+ * `RequiresCapture` for manual capture, `Succeeded` otherwise.
+ *
  * @api
  */
 final readonly class FakeGatewayConfig
@@ -21,7 +26,7 @@ final readonly class FakeGatewayConfig
         ?PaymentProvider $provider = null,
         ?CapabilitySet $capabilities = null,
         ?\DateTimeImmutable $now = null,
-        public PaymentState $createState = PaymentState::Succeeded,
+        public ?PaymentState $createState = null,
     ) {
         $this->provider = $provider ?? new PaymentProvider(value: 'fake');
         $this->capabilities = $capabilities ?? CapabilitySet::of();

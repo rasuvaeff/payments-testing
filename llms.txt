@@ -6,8 +6,42 @@ Rules: namespace `Rasuvaeff\PaymentsTesting`; contracts come from
 `rasuvaeff/payments` (`Rasuvaeff\Payments`). `FakePaymentGateway` implements
 only the base `PaymentGatewayInterface`. Use `FakeCaptureGateway`,
 `FakeConfirmGateway`, `FakeCancelGateway` or `FakeRefundGateway` when that
-optional interface is required. Idempotency keys replay only identical request
-fingerprints; a reused key with different data throws. Time is fixed via
+optional interface is required. Idempotency keys share one space across
+operations: a key replays only the identical request (same operation, payment,
+payload — for a create every field: amount, currency, payment method id/kind,
+customer id/providerId, capture/confirmation method, description, metadata;
+for capture/refund the request's own amount, `null` ≠ the full amount);
+anything else throws `IdempotencyConflictException` (a create key reused for a
+refund too). A replayed
+`createPayment()` returns the saved create response (re-stamped with the
+replay's `OperationId`) and never overwrites the stored payment — current state
+comes from `retrievePayment()`. Replayed capture/confirm/cancel/refund calls
+also return their saved response without re-running and without the state
+gate; a replayed refund is not counted twice. A refusal for state, balance or
+a capture above the authorization is saved too (Stripe saves errors once the
+endpoint runs): the same request + key rethrows the same exception instance,
+a corrected request with that key → `IdempotencyConflictException`; a zero
+amount (validation) and a key conflict save nothing. Create state without a pinned
+`createState`: no paymentMethod → `RequiresPaymentMethod`; manual confirmation
+→ `Pending`; manual capture → `RequiresCapture`; else `Succeeded`
+(`capturedAmount` = amount when `Succeeded`, zero otherwise). `capturedAmount`
+is gross: refunds never lower it; reconcile orders against it (example
+`examples/reconcile-partial-capture.php`). State gating
+(`PaymentException`): capture only from `RequiresCapture`, ≤ amount, same
+currency → `Succeeded` with `capturedAmount` = captured, `amount` unchanged;
+confirm only from `Pending`/`RequiresAction` → `RequiresCapture` (manual
+capture) or `Succeeded`; cancel from anything but
+`Succeeded`/`Failed`/`Canceled` → `Canceled`. Refunds (`RefundFailedException`)
+only of `Succeeded`, same currency, ≤ `capturedAmount` − earlier refunds (no
+amount = the rest). A zero capture or refund amount → plain `PaymentException`
+before the key is looked at (validation; the key stays free). `simulateTransition(PaymentReference, PaymentState,
+?OperationId)` on every fake moves a payment as the provider would without an
+API call (3DS done, deferred payment paid); only `canTransitionTo()` moves,
+else `InvalidArgumentException`; `Succeeded` with nothing captured captures
+the whole amount — for a manual-capture payment only from
+`RequiresCapture`/`Processing` (from `Pending`/`RequiresPaymentMethod`/
+`RequiresAction` → `InvalidArgumentException`; simulate `RequiresCapture`,
+then capture). Time is fixed via
 `FakeGatewayConfig::$now` — never the wall clock. Assertions throw
 `ContractViolationException` (extends `RuntimeException`) on violations and
 work with any test framework.
@@ -19,13 +53,14 @@ $config = new FakeGatewayConfig(
     provider: new PaymentProvider(value: 'fake'),          // default 'fake'
     capabilities: CapabilitySet::of(),                     // default empty
     now: new \DateTimeImmutable('2025-01-01T00:00:00+00:00'), // default shown
-    createState: PaymentState::Succeeded,                  // default
+    createState: null,                                     // default: derived from the request
 );
 $gateway = new FakePaymentGateway(config: $config);        // config optional
 $attempt = $gateway->createPayment($createPaymentRequest); // PaymentAttempt
 $attempt = $gateway->retrievePayment($retrievePaymentRequest);
 $gateway->provider();      // PaymentProvider
 $gateway->capabilities();  // CapabilitySet
+$gateway->simulateTransition($attempt->payment, PaymentState::Succeeded); // PaymentAttempt
 ```
 
 - `FakeCaptureGateway::capturePayment(CapturePaymentRequest): PaymentAttempt`
@@ -35,6 +70,10 @@ $gateway->capabilities();  // CapabilitySet
   `retrieveRefund(RetrieveRefundRequest): RefundAttempt`
 - `PartialRefundCapability` in config of a non-refund fake →
   `InvalidArgumentException`.
+- `FakeRefundGateway` honours the capability set: without
+  `PartialRefundCapability` (default `CapabilitySet::of()`) only the whole
+  remaining amount is refunded (a smaller amount → `RefundFailedException`);
+  `maximumRefunds` caps refunds per payment (a replay does not count).
 
 ## Contract assertions
 
@@ -46,12 +85,15 @@ methods require intersection types
 ```php
 PaymentGatewayAssertions::assertCapabilities(PaymentGatewayInterface $g): CapabilitySet;
 PaymentGatewayAssertions::assertCreatePayment(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt;
-PaymentGatewayAssertions::assertCreatePaymentIdempotency(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt; // needs idempotencyKey
+PaymentGatewayAssertions::assertCreatePaymentIdempotency(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt; // replays the request's (possibly generated) key
 PaymentGatewayAssertions::assertRetrievePayment(PaymentGatewayInterface $g, RetrievePaymentRequest $r): PaymentAttempt;
 
-CaptureGatewayAssertions::assertCapturePayment(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt;
+CaptureGatewayAssertions::assertCapturePayment(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt; // capturedAmount by outcome: Succeeded → exactly the request amount (or attempt amount); Failed/Pending → 0 or null; other → null or ≤ requested; same currency; reference and amount not compared
+CaptureGatewayAssertions::assertCapturePaymentIdempotency(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt; // needs idempotencyKey
 ConfirmGatewayAssertions::assertConfirmPayment(PaymentGatewayInterface&ConfirmGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt;
+ConfirmGatewayAssertions::assertConfirmPaymentIdempotency(PaymentGatewayInterface&ConfirmGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt; // needs idempotencyKey
 CancelGatewayAssertions::assertCancelPayment(PaymentGatewayInterface&CancelGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt;
+CancelGatewayAssertions::assertCancelPaymentIdempotency(PaymentGatewayInterface&CancelGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt; // needs idempotencyKey
 
 RefundGatewayAssertions::assertCreateRefund(PaymentGatewayInterface&RefundGatewayInterface $g, CreateRefundRequest $r): RefundAttempt;
 RefundGatewayAssertions::assertCreateRefundIdempotency(PaymentGatewayInterface&RefundGatewayInterface $g, CreateRefundRequest $r): RefundAttempt; // needs idempotencyKey
@@ -63,9 +105,21 @@ operation id, payment/refund references and requested amounts are preserved;
 idempotent replays return the same reference; `assertCapabilities` fails when
 `PartialRefundCapability` is advertised without `RefundGatewayInterface`.
 Idempotency keys scope by the key alone, never by `OperationId`: a provider
-only ever sees the header value. Idempotency asserts throw
-`InvalidArgumentException` when `idempotencyKey` is null. `assertCreatePaymentIdempotency` and `assertCreateRefundIdempotency` probe
+only ever sees the header value. Capture/confirm/cancel/refund idempotency asserts throw
+`InvalidArgumentException` when `idempotencyKey` is null; a create request
+always has one (given or generated UUID v4). `assertCreatePaymentIdempotency` and `assertCreateRefundIdempotency` probe
 all three halves of the contract — same key returns the original payment, a different key
-(`<key>-contract-other`) starts a new one, and the original key with
-`amount + 1` must be refused — so a gateway that ignores the key cannot pass.
+(`contract-other-` + 16 hex chars of `sha256(<key>)`, 31 bytes, fits any provider cap) starts a new one, and the original key with a changed
+amount must be refused — so a gateway that ignores the key cannot pass. The
+create probe asks for `amount + 1` (`- 1` at `PHP_INT_MAX`); the refund probe
+asks for `amount - 1` (`+ 1` when the amount is 0 or 1), so an ordinary balance
+check cannot pass for idempotency enforcement.
 It therefore creates payments: run it against fakes or a sandbox.
+`assertCapturePaymentIdempotency` replays the key (same reference, amount,
+captured amount, state) and probes the key with the captured amount `- 1`
+(`+ 1` at 0 or 1);
+`assertConfirmPaymentIdempotency` / `assertCancelPaymentIdempotency` replay the
+key and compare the state. A key-reuse probe counts any `\Exception` as a
+refusal except `TransportException`, `ServerException`, `RateLimitedException`,
+`UnauthorizedException`, `ForbiddenException` (rethrown: inconclusive);
+`\Error` is not caught. Operation states are not checked.
