@@ -75,17 +75,12 @@ final class FixtureGateway implements
     {
         $key = $request->idempotencyKey;
         $this->received[] = [$key, $request->amount->minorUnits];
-
-        if ($key !== null) {
-            $fingerprint = $request->amount->minorUnits . '|' . $request->amount->currency;
-            $seen = $this->idempotency[$key] ?? null;
-
-            if ($seen !== null && $seen !== $fingerprint) {
-                throw new \InvalidArgumentException('Idempotency key was reused with a different request');
-            }
-
-            $this->idempotency[$key] = $fingerprint;
+        $fingerprint = $request->amount->minorUnits . '|' . $request->amount->currency;
+        $seen = $this->idempotency[$key] ?? null;
+        if ($seen !== null && $seen !== $fingerprint) {
+            throw new \InvalidArgumentException('Idempotency key was reused with a different request');
         }
+        $this->idempotency[$key] = $fingerprint;
 
         return $this->paymentAttempt(
             operationId: $request->operationId,
@@ -106,7 +101,8 @@ final class FixtureGateway implements
         return $this->paymentAttempt(
             $request->operationId,
             new PaymentReference($this->provider(), 'capture_' . $request->operationId->value, 'capture'),
-            $request->amount ?? new Money(100, 'EUR'),
+            new Money(100, 'EUR'),
+            capturedAmount: $request->amount ?? new Money(100, 'EUR'),
         );
     }
 
@@ -164,6 +160,7 @@ final class FixtureGateway implements
         PaymentReference $reference,
         Money $amount,
         PaymentState $state = PaymentState::Succeeded,
+        ?Money $capturedAmount = null,
     ): PaymentAttempt {
         $now = new \DateTimeImmutable('2025-01-01T00:00:00+00:00');
 
@@ -177,6 +174,7 @@ final class FixtureGateway implements
             createdAt: $now,
             updatedAt: $now,
             requestInfo: new ProviderRequestInfo($now),
+            capturedAmount: $capturedAmount,
         );
     }
 

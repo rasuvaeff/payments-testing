@@ -40,34 +40,67 @@ $sameAttempt = $gateway->retrievePayment(new RetrievePaymentRequest(
 ));
 ```
 
-Fakes полностью детерминированы:
+Fakes ведут себя как провайдер, детерминированно.
 
-- Вызовы с одинаковым idempotency key и одинаковым fingerprint запроса
-  возвращают одну provider reference. Ключ — вся область видимости: провайдер
-  никогда не узнаёт, какой `OperationId` выдал вызов, поэтому две операции с
-  одним ключом воспроизводят друг друга ровно так, как это сделает настоящий
-  шлюз.
-- Повторный `createPayment()` отвечает сохранённым для ключа ответом — платёж в
-  том виде, в каком он был создан, с `OperationId` повторного вызова — и не
-  трогает хранимый платёж. Захваченный после создания платёж остаётся
-  захваченным; текущее состояние читается через `retrievePayment()`. Повторные
-  `capturePayment()`, `confirmPayment()`, `cancelPayment()` и `createRefund()`
-  так же отвечают сохранённым ответом: операция не выполняется заново, а
-  повторный возврат не списывается с баланса дважды.
-- Fake отказывает там, где провайдер отказывает по деньгам: возврат платежа не в
-  состоянии `Succeeded`, возврат в другой валюте, возврат больше остатка после
-  прошлых возвратов (без суммы возврат берёт весь остаток, поэтому второй полный
-  возврат отклоняется) — `RefundFailedException`; capture больше суммы, на
-  которую создан платёж, или в другой валюте — `PaymentException`. Отклонённый
-  запрос оставляет свой idempotency key свободным.
-- Машину состояний провайдера для capture, confirm и cancel fake не моделирует:
-  они выполняются из любого состояния (при умолчании `createState: Succeeded`
-  `cancelPayment()` по-прежнему отвечает `Canceled`). Ключи идемпотентности
-  разделены по операциям, так что ключ от create, повторно использованный для
-  refund, принимается — Stripe его отвергнет. У захваченного платежа `amount` —
-  захваченная сумма; Stripe оставляет там авторизованную.
-- Повторное использование ключа с другими данными бросает исключение; вызовы
-  без ключа получают разные детерминированные references.
+**Create отвечает в том состоянии, в каком ответит провайдер.** Если
+`FakeGatewayConfig::$createState` его не фиксирует, состояние следует из
+запроса:
+
+| Запрос | Состояние | `capturedAmount` |
+|---|---|---|
+| без `paymentMethod` (отложенный сценарий) | `RequiresPaymentMethod` | ноль |
+| `confirmationMethod: Manual` | `Pending` | ноль |
+| `captureMethod: Manual` | `RequiresCapture` | ноль |
+| иначе | `Succeeded` | вся сумма |
+
+Зафиксированный `createState` действует на каждый create; платёж тогда
+сообщает всю сумму захваченной, если он `Succeeded`, и ноль в остальных
+случаях.
+
+**Операции разрешены по состоянию**, как у Stripe и PayPal:
+
+| Операция | Разрешена из | Переводит в | Отказ |
+|---|---|---|---|
+| `capturePayment()` | `RequiresCapture`; не больше `amount`, та же валюта | `Succeeded`, `capturedAmount` = захваченная сумма (`amount`, если суммы нет) | `PaymentException` |
+| `confirmPayment()` | `Pending`, `RequiresAction` | `RequiresCapture` для платежа с ручным capture, иначе `Succeeded` | `PaymentException` |
+| `cancelPayment()` | любое состояние, кроме `Succeeded`, `Failed`, `Canceled` | `Canceled` | `PaymentException` |
+| `createRefund()` | `Succeeded`; та же валюта; не больше `capturedAmount` за вычетом прошлых возвратов (без суммы — весь остаток) | возврат `Succeeded` | `RefundFailedException` |
+
+Capture никогда не меняет `amount`: это остаётся созданная (авторизованная)
+сумма, а `capturedAmount` сообщает, сколько списано, так что после частичного
+capture 700 из 1 200 вернуть можно 700.
+
+**То, что происходит без API-вызова** — покупатель проходит 3-D Secure или
+оплачивает отложенный платёж, перевод зачисляется, авторизация истекает, —
+делает `simulateTransition()`, доступный у каждого fake:
+
+```php
+$attempt = $gateway->createPayment($deferredRequest);              // RequiresPaymentMethod
+$gateway->simulateTransition($attempt->payment, PaymentState::Succeeded); // покупатель оплатил
+```
+
+Он принимает только переход, который разрешает `PaymentState::canTransitionTo()`
+(иначе `InvalidArgumentException`); переход в `Succeeded` без захваченной суммы
+захватывает всю сумму.
+
+**У ключей идемпотентности одно пространство**, как у Stripe, где ключ привязан
+к эндпоинту и параметрам первого запроса:
+
+- тот же ключ с тем же запросом — та же операция, платёж и данные — получает
+  сохранённый ответ: операция не выполняется заново, проверка состояния не
+  применяется, повторный возврат не списывается дважды, а повторный
+  `createPayment()` возвращает платёж в том виде, в каком он был создан (с
+  `OperationId` повторного вызова), не трогая хранимый;
+- тот же ключ с чем-то другим — другими данными, другим платежом, другой
+  операцией, ключом от create для refund — бросает
+  `IdempotencyConflictException`, то же исключение, что декодер ядра бросает на
+  `idempotency_error` провайдера;
+- отклонённый запрос оставляет свой ключ свободным; вызовы без ключа различны.
+  Ключ — вся область видимости: провайдер никогда не узнаёт, какой
+  `OperationId` выдал вызов.
+
+Также:
+
 - References другого провайдера и неизвестные references отклоняются.
 - Время фиксируется через `FakeGatewayConfig` (`now`, по умолчанию
   `2025-01-01T00:00:00+00:00`) — wall clock не используется.
@@ -82,7 +115,7 @@ Fakes полностью детерминированы:
 | `FakeConfirmGateway` | `ConfirmGatewayInterface` |
 | `FakeCancelGateway` | `CancelGatewayInterface` |
 | `FakeRefundGateway` | `RefundGatewayInterface` |
-| `FakeGatewayConfig` | Provider, capabilities, фиксированное время и create state |
+| `FakeGatewayConfig` | Provider, capabilities, фиксированное время и необязательный фиксированный create state |
 
 Конфигурация:
 
@@ -129,8 +162,8 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 | `PaymentGatewayAssertions` | `assertCreatePayment()` | Консистентность провайдера, сохранение operation id и amount |
 | `PaymentGatewayAssertions` | `assertCreatePaymentIdempotency()` | Повтор ключа возвращает тот же платёж, **другой** ключ начинает новый, а переиспользование ключа с изменённым запросом отвергается |
 | `PaymentGatewayAssertions` | `assertRetrievePayment()` | Консистентность провайдера, сохранение operation id и payment reference |
-| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture сохраняет operation id и amount, провайдер консистентен (payment reference не сравнивается: PayPal отвечает reference самого capture) |
-| `CaptureGatewayAssertions` | `assertCapturePaymentIdempotency()` | Повтор ключа возвращает ту же reference, сумму и состояние, а переиспользование ключа с изменённой суммой отвергается |
+| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture сохраняет operation id, провайдер консистентен, а `capturedAmount` равен запрошенной сумме (`amount` платежа, если суммы нет); `amount` остаётся авторизацией и не сравнивается, как и payment reference (PayPal отвечает reference самого capture) |
+| `CaptureGatewayAssertions` | `assertCapturePaymentIdempotency()` | Повтор ключа возвращает ту же reference, сумму, захваченную сумму и состояние, а переиспользование ключа с изменённой суммой (на единицу от захваченной) отвергается |
 | `ConfirmGatewayAssertions` | `assertConfirmPayment()` | Confirm сохраняет operation id и payment reference |
 | `ConfirmGatewayAssertions` | `assertConfirmPaymentIdempotency()` | Повтор ключа возвращает то же состояние |
 | `CancelGatewayAssertions` | `assertCancelPayment()` | Cancel сохраняет operation id и payment reference |

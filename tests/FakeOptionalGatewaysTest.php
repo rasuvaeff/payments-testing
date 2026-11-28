@@ -6,7 +6,9 @@ namespace Rasuvaeff\PaymentsTesting\Tests;
 
 use Rasuvaeff\Payments\CapabilitySet;
 use Rasuvaeff\Payments\CapturePaymentRequest;
+use Rasuvaeff\Payments\CreatePaymentRequest;
 use Rasuvaeff\Payments\CreateRefundRequest;
+use Rasuvaeff\Payments\IdempotencyConflictException;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
 use Rasuvaeff\Payments\PartialRefundCapability;
@@ -43,7 +45,7 @@ final class FakeOptionalGatewaysTest
     public function captureFakeSatisfiesContract(): void
     {
         $gateway = new FakeCaptureGateway();
-        $payment = $gateway->createPayment(Fixtures::createPayment())->payment;
+        $payment = $gateway->createPayment(Fixtures::authorizePayment())->payment;
         $attempt = CaptureGatewayAssertions::assertCapturePayment(
             gateway: $gateway,
             request: new CapturePaymentRequest(
@@ -54,14 +56,15 @@ final class FakeOptionalGatewaysTest
             ),
         );
 
-        Assert::same($attempt->amount->minorUnits, 600);
+        Assert::same($attempt->amount->minorUnits, 1_200);
+        Assert::same($attempt->capturedAmount?->minorUnits, 600);
         Assert::same($attempt->state, PaymentState::Succeeded);
     }
 
     public function captureRejectsChangedFingerprintForSameOperationKey(): void
     {
         $gateway = new FakeCaptureGateway();
-        $payment = $gateway->createPayment(Fixtures::createPayment())->payment;
+        $payment = $gateway->createPayment(Fixtures::authorizePayment())->payment;
         $operationId = new OperationId(value: 'capture-1');
         $gateway->capturePayment(new CapturePaymentRequest(
             operationId: $operationId,
@@ -70,7 +73,7 @@ final class FakeOptionalGatewaysTest
             idempotencyKey: 'capture-key',
         ));
 
-        Expect::exception(\InvalidArgumentException::class)->withMessageContaining('Idempotency key');
+        Expect::exception(IdempotencyConflictException::class)->withMessageContaining('Idempotency key');
         $gateway->capturePayment(new CapturePaymentRequest(
             operationId: $operationId,
             payment: $payment,
@@ -82,7 +85,7 @@ final class FakeOptionalGatewaysTest
     public function confirmFakeSatisfiesContract(): void
     {
         $gateway = new FakeConfirmGateway();
-        $payment = $gateway->createPayment(Fixtures::createPayment())->payment;
+        $payment = $gateway->createPayment(Fixtures::pendingPayment())->payment;
         $attempt = ConfirmGatewayAssertions::assertConfirmPayment(
             gateway: $gateway,
             request: new PaymentOperationRequest(
@@ -92,13 +95,14 @@ final class FakeOptionalGatewaysTest
             ),
         );
 
-        Assert::same($attempt->state, PaymentState::Processing);
+        Assert::same($attempt->state, PaymentState::Succeeded);
+        Assert::same($attempt->capturedAmount?->minorUnits, 1_200);
     }
 
     public function cancelFakeSatisfiesContract(): void
     {
         $gateway = new FakeCancelGateway();
-        $payment = $gateway->createPayment(Fixtures::createPayment())->payment;
+        $payment = $gateway->createPayment(Fixtures::authorizePayment())->payment;
         $attempt = CancelGatewayAssertions::assertCancelPayment(
             gateway: $gateway,
             request: new PaymentOperationRequest(
@@ -136,6 +140,31 @@ final class FakeOptionalGatewaysTest
 
         Assert::same($retrieved->refund, $created->refund);
         Assert::same($retrieved->actualAmount?->minorUnits, 300);
+    }
+
+    /**
+     * A deferred payment is paid by the customer outside the API; the fake
+     * reaches the state the webhook reports through simulateTransition().
+     */
+    public function simulatesWhatHappensWithoutAnApiCall(): void
+    {
+        $gateway = new FakeRefundGateway();
+        $payment = $gateway->createPayment(new CreatePaymentRequest(
+            operationId: new OperationId(value: 'deferred-1'),
+            amount: new Money(minorUnits: 1_200, currency: 'EUR'),
+        ))->payment;
+
+        Assert::same($gateway->simulateTransition($payment, PaymentState::RequiresAction)->state, PaymentState::RequiresAction);
+        $paid = $gateway->simulateTransition($payment, PaymentState::Succeeded, new OperationId(value: 'webhook-1'));
+        $default = $gateway->simulateTransition($payment, PaymentState::Succeeded);
+
+        Assert::same($paid->operationId->value, 'webhook-1');
+        Assert::same($paid->capturedAmount?->minorUnits, 1_200);
+        Assert::same($default->operationId->value, 'fake-transition');
+        Assert::same($gateway->createRefund(new CreateRefundRequest(
+            operationId: new OperationId(value: 'refund-1'),
+            payment: $payment,
+        ))->requestedAmount->minorUnits, 1_200);
     }
 
     public function captureFakeRejectsPartialRefundCapability(): void

@@ -43,17 +43,28 @@ docker run --rm -v "$PWD":/app -w /app composer:2 composer test
   Scoping by operation makes the fake accept a key collision that the real
   gateway refuses, and a permissive double is the one failure mode a testing
   package cannot afford.
-- Same key plus different fingerprint throws; calls without a key remain distinct.
+- Same key plus different fingerprint (operation, payment, payload) throws;
+  calls without a key remain distinct.
   A replay of any keyed operation answers from its saved response and never
   runs the operation again.
-- **The fake refuses what a provider refuses with money**: refunds of an
-  unpaid payment, in another currency or above the remaining balance, and
-  captures above the created amount or in another currency.
+- **The fake refuses what a provider refuses**: capture only from
+  `RequiresCapture` and never above `amount`; confirm only from
+  `Pending`/`RequiresAction`; cancel never from `Succeeded`/`Failed`/`Canceled`;
+  refunds only of `Succeeded`, same currency, up to `capturedAmount` less
+  earlier refunds. The state table is the docblock of
+  `Internal\FakeGatewayCore` and the README; keep all three in step.
   `FakeGatewayCoreTest::ledgerAgreesWithAProviderModel` (rule machine in
-  `tests/Support/FakeLedgerMachine.php`) is the model; extend the machine
-  when the fake learns a new rule. Not modelled on purpose: state gating of
-  capture/confirm/cancel (the default `createState` is `Succeeded`) and one
-  key space across operations.
+  `tests/Support/FakeLedgerMachine.php`, six create scenarios) is the model,
+  written from provider rules — never derive it from the fake's code or from
+  `canTransitionTo()`. Extend the machine when the fake learns a rule, and
+  re-measure the `Classify::cover` shares before changing a threshold.
+- **`amount` is never rewritten by a capture.** `capturedAmount` carries what
+  was taken; the default create state follows the request (no method →
+  `RequiresPaymentMethod`, manual confirmation → `Pending`, manual capture →
+  `RequiresCapture`, else `Succeeded`).
+- **One key space across operations.** A key conflict throws
+  `IdempotencyConflictException` — the exception real adapters raise — never
+  `\InvalidArgumentException`.
 - A key-reuse probe counts only an answer as a refusal (`Internal\KeyReuseProbe`):
   transport, 5xx, rate-limit and credential failures propagate.
 - References from another provider and unknown references are rejected.

@@ -40,14 +40,14 @@ final class OperationIdempotencyAssertionsTest
         $capture = new FakeCaptureGateway(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
         $captured = CaptureGatewayAssertions::assertCapturePaymentIdempotency($capture, new CapturePaymentRequest(
             operationId: new OperationId('capture-1'),
-            payment: $capture->createPayment(Fixtures::createPayment())->payment,
+            payment: $capture->createPayment(Fixtures::authorizePayment())->payment,
             amount: new Money(600, 'EUR'),
             idempotencyKey: 'capture-key',
         ));
-        $confirm = new FakeConfirmGateway(new FakeGatewayConfig(createState: PaymentState::RequiresAction));
+        $confirm = new FakeConfirmGateway();
         $confirmed = ConfirmGatewayAssertions::assertConfirmPaymentIdempotency(
             $confirm,
-            $this->operation($confirm->createPayment(Fixtures::createPayment())->payment, 'confirm-key'),
+            $this->operation($confirm->createPayment(Fixtures::pendingPayment())->payment, 'confirm-key'),
         );
         $cancel = new FakeCancelGateway(new FakeGatewayConfig(createState: PaymentState::RequiresAction));
         $canceled = CancelGatewayAssertions::assertCancelPaymentIdempotency(
@@ -55,9 +55,10 @@ final class OperationIdempotencyAssertionsTest
             $this->operation($cancel->createPayment(Fixtures::createPayment())->payment, 'cancel-key'),
         );
 
-        Assert::same($captured->amount->minorUnits, 600);
+        Assert::same($captured->amount->minorUnits, 1_200);
+        Assert::same($captured->capturedAmount?->minorUnits, 600);
         Assert::same($captured->state, PaymentState::Succeeded);
-        Assert::same($confirmed->state, PaymentState::Processing);
+        Assert::same($confirmed->state, PaymentState::Succeeded);
         Assert::same($canceled->state, PaymentState::Canceled);
     }
 
@@ -66,11 +67,11 @@ final class OperationIdempotencyAssertionsTest
         $capture = new FakeCaptureGateway(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
         $captured = CaptureGatewayAssertions::assertCapturePaymentIdempotency($capture, new CapturePaymentRequest(
             operationId: new OperationId('capture-1'),
-            payment: $capture->createPayment(Fixtures::createPayment())->payment,
+            payment: $capture->createPayment(Fixtures::authorizePayment())->payment,
             idempotencyKey: 'capture-key',
         ));
 
-        Assert::same($captured->amount->minorUnits, 1_200);
+        Assert::same($captured->capturedAmount?->minorUnits, 1_200);
     }
 
     /**
@@ -114,6 +115,52 @@ final class OperationIdempotencyAssertionsTest
             static fn(string $operation, int $call, CapturePaymentRequest|PaymentOperationRequest $request): PaymentAttempt => ScriptedOperationGateway::attempt($request->operationId, 'pay_1', 50),
             'Reusing a capture idempotency key with a different request was accepted',
         ];
+    }
+
+    /**
+     * A capture is checked on `capturedAmount`, not on `amount`: after a
+     * partial capture `amount` is still the authorization.
+     *
+     * @param non-empty-string $message
+     */
+    #[DataProvider('capturedAmountProvider')]
+    public function holdsACaptureToItsCapturedAmount(?Money $requested, PaymentAttempt $answer, ?string $message): void
+    {
+        if ($message !== null) {
+            Expect::exception(ContractViolationException::class)->withMessage($message);
+        }
+
+        $attempt = CaptureGatewayAssertions::assertCapturePayment(
+            new ScriptedOperationGateway(static fn(string $operation, int $call, CapturePaymentRequest|PaymentOperationRequest $request): PaymentAttempt => $answer),
+            $this->capture($requested),
+        );
+
+        Assert::same($attempt, $answer);
+    }
+
+    /** @return iterable<string, array{?Money, PaymentAttempt, ?string}> */
+    public static function capturedAmountProvider(): iterable
+    {
+        $operation = new OperationId('capture-1');
+
+        yield 'partial capture' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100, captured: new Money(40, 'EUR')), null];
+        yield 'full capture without an amount' => [null, ScriptedOperationGateway::attempt($operation, 'pay_1', 100), null];
+        yield 'not reported' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 40, reportsCaptured: false), 'Capture response did not report the captured amount'];
+        yield 'the authorization reported as captured' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100), 'Capture response reported another captured amount than requested'];
+        yield 'less captured than a full capture' => [null, ScriptedOperationGateway::attempt($operation, 'pay_1', 100, captured: new Money(99, 'EUR')), 'Capture response reported another captured amount than requested'];
+    }
+
+    public function captureIdempotencyNeedsTheCapturedAmountReported(): void
+    {
+        $gateway = new ScriptedOperationGateway(static fn(string $operation, int $call, CapturePaymentRequest|PaymentOperationRequest $request): PaymentAttempt => ScriptedOperationGateway::attempt(
+            $request->operationId,
+            'pay_1',
+            50,
+            reportsCaptured: $call === 1,
+        ));
+
+        Expect::exception(ContractViolationException::class)->withMessage('Capture response did not report the captured amount');
+        CaptureGatewayAssertions::assertCapturePaymentIdempotency($gateway, $this->capture(null));
     }
 
     /**

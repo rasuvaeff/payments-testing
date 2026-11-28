@@ -47,6 +47,8 @@ final class ScriptedOperationGateway implements
         string $id,
         int $amount = 100,
         PaymentState $state = PaymentState::Succeeded,
+        ?Money $captured = null,
+        bool $reportsCaptured = true,
     ): PaymentAttempt {
         $provider = new PaymentProvider('fake');
         $now = new \DateTimeImmutable('2025-01-01T00:00:00+00:00');
@@ -61,6 +63,7 @@ final class ScriptedOperationGateway implements
             createdAt: $now,
             updatedAt: $now,
             requestInfo: new ProviderRequestInfo($now),
+            capturedAmount: $reportsCaptured ? $captured ?? new Money($amount, 'EUR') : null,
         );
     }
 

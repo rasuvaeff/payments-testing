@@ -21,6 +21,12 @@ final class CaptureGatewayAssertions
      * The payment reference is not compared with the request's: a provider
      * may answer a capture with a reference of its own (PayPal returns the
      * capture, not the order).
+     *
+     * A capture response must report `capturedAmount`: the requested amount,
+     * or the payment's `amount` for a capture without one. `amount` itself
+     * stays the authorized amount and is not compared — after a partial
+     * capture it is larger than what was taken. Run it against a payment
+     * with no earlier capture.
      */
     public static function assertCapturePayment(
         PaymentGatewayInterface&CaptureGatewayInterface $gateway,
@@ -31,8 +37,11 @@ final class CaptureGatewayAssertions
             attempt: $attempt,
             provider: $gateway->provider(),
             operationId: $request->operationId,
-            amount: $request->amount,
         );
+
+        $captured = $attempt->capturedAmount
+            ?? throw new ContractViolationException('Capture response did not report the captured amount');
+        AttemptAssertions::same($captured, $request->amount ?? $attempt->amount, 'Capture response reported another captured amount than requested');
 
         return $attempt;
     }
@@ -62,12 +71,12 @@ final class CaptureGatewayAssertions
         $second = self::assertCapturePayment($gateway, $request);
         AttemptAssertions::same($second->payment, $first->payment, 'Capture idempotency key produced another payment reference');
         AttemptAssertions::same($second->amount, $first->amount, 'A replayed capture reported another amount');
+        $captured = $first->capturedAmount ?? throw new ContractViolationException('Capture response did not report the captured amount');
 
         if ($second->state !== $first->state) {
             throw new ContractViolationException('A replayed capture reported another state');
         }
 
-        $captured = $first->amount;
         $conflicting = new CapturePaymentRequest(
             operationId: $request->operationId,
             payment: $request->payment,

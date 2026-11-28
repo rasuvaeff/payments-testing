@@ -48,7 +48,8 @@ final class OptionalGatewayAssertionsTest
             new PaymentOperationRequest(new OperationId('cancel-1'), $payment),
         );
 
-        Assert::same($captured->amount->minorUnits, 50);
+        Assert::same($captured->amount->minorUnits, 100);
+        Assert::same($captured->capturedAmount?->minorUnits, 50);
         Assert::same($captured->payment->id, 'capture_capture-1');
         Assert::same($captured->payment->kind, 'capture');
         Assert::same($confirmed->payment, $payment);

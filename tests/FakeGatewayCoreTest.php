@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace Rasuvaeff\PaymentsTesting\Tests;
 
+use Rasuvaeff\Payments\CaptureMethod;
 use Rasuvaeff\Payments\CapturePaymentRequest;
+use Rasuvaeff\Payments\ConfirmationMethod;
 use Rasuvaeff\Payments\CreatePaymentRequest;
 use Rasuvaeff\Payments\CreateRefundRequest;
+use Rasuvaeff\Payments\IdempotencyConflictException;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
 use Rasuvaeff\Payments\PaymentException;
+use Rasuvaeff\Payments\PaymentMethodReference;
 use Rasuvaeff\Payments\PaymentOperationRequest;
 use Rasuvaeff\Payments\PaymentProvider;
 use Rasuvaeff\Payments\PaymentReference;
@@ -39,6 +43,29 @@ use Testo\Test;
 #[Covers(FakeGatewayCore::class)]
 final class FakeGatewayCoreTest
 {
+    /**
+     * Minimum share of sequences (in percent) that must take each branch of
+     * the ledger model, set at roughly half of the share measured over
+     * repeated 300-run samples (replays: 5-7%, measured 2026-11-28).
+     */
+    private const array LEDGER_BRANCHES = [
+        'capture accepted' => 10,
+        'capture refused' => 5,
+        'capture refused by state' => 40,
+        'capture replayed' => 2,
+        'confirm accepted' => 8,
+        'confirm refused' => 30,
+        'confirm replayed' => 2,
+        'cancel accepted' => 20,
+        'cancel refused' => 25,
+        'cancel replayed' => 5,
+        'refund accepted' => 8,
+        'refund refused' => 30,
+        'refund replayed' => 2,
+        'create replayed' => 40,
+        'key conflict' => 40,
+    ];
+
     private FakeGatewayCore $core;
 
     #[BeforeTest]
@@ -113,20 +140,20 @@ final class FakeGatewayCoreTest
 
     public function refusesCaptureKeyReusedForAnotherPayment(): void
     {
-        $first = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'a'))->payment;
-        $second = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-2', idempotencyKey: 'b'))->payment;
+        $first = $this->core->createPayment(Fixtures::authorizePayment(operation: 'operation-1', idempotencyKey: 'a'))->payment;
+        $second = $this->core->createPayment(Fixtures::authorizePayment(operation: 'operation-2', idempotencyKey: 'b'))->payment;
         $this->core->capturePayment($this->capture($first, 'capture-key'));
 
-        Expect::exception(\InvalidArgumentException::class)->withMessage('Idempotency key was reused with a different fake request');
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
         $this->core->capturePayment($this->capture($second, 'capture-key'));
     }
 
     public function refusesCaptureKeyReusedWithAnotherCurrency(): void
     {
-        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
         $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 100, currency: 'EUR')));
 
-        Expect::exception(\InvalidArgumentException::class)->withMessage('Idempotency key was reused with a different fake request');
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
         $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 100, currency: 'USD')));
     }
 
@@ -144,6 +171,7 @@ final class FakeGatewayCoreTest
     {
         $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
         $created = $core->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'create-key'));
+        Assert::same($created->capturedAmount?->minorUnits, 0);
         $core->capturePayment($this->capture($created->payment, null, new Money(minorUnits: 500, currency: 'EUR')));
 
         $replayed = $core->createPayment(Fixtures::createPayment(operation: 'operation-2', idempotencyKey: 'create-key'));
@@ -156,14 +184,16 @@ final class FakeGatewayCoreTest
         Assert::same($replayed->operationId->value, 'operation-2');
         Assert::same($replayed->state, PaymentState::RequiresCapture);
         Assert::same($replayed->amount->minorUnits, 1_200);
+        Assert::same($replayed->capturedAmount?->minorUnits, 0);
         Assert::same($replayed->createdAt, $created->createdAt);
         Assert::same($current->state, PaymentState::Succeeded);
-        Assert::same($current->amount->minorUnits, 500);
+        Assert::same($current->amount->minorUnits, 1_200);
+        Assert::same($current->capturedAmount?->minorUnits, 500);
     }
 
     public function replaysCaptureWithTheSameKeyAndRequest(): void
     {
-        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
         $first = $this->core->capturePayment($this->capture($payment, 'capture-key'));
         $second = $this->core->capturePayment($this->capture($payment, 'capture-key'));
 
@@ -173,41 +203,70 @@ final class FakeGatewayCoreTest
     #[ExpectNoAssertions]
     public function doesNotTrackCapturesWithoutAKey(): void
     {
-        $first = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'a'))->payment;
-        $second = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-2', idempotencyKey: 'b'))->payment;
+        $first = $this->core->createPayment(Fixtures::authorizePayment(operation: 'operation-1', idempotencyKey: 'a'))->payment;
+        $second = $this->core->createPayment(Fixtures::authorizePayment(operation: 'operation-2', idempotencyKey: 'b'))->payment;
 
         $this->core->capturePayment($this->capture($first, null, new Money(minorUnits: 100, currency: 'EUR')));
         $this->core->capturePayment($this->capture($second, null, new Money(minorUnits: 200, currency: 'EUR')));
     }
 
-    #[ExpectNoAssertions]
-    public function scopesOperationKeysByOperation(): void
+    /**
+     * One key space across operations, as at Stripe, where a key is bound
+     * to the endpoint and parameters of its first request: a key used for
+     * one operation is refused for another, whatever the payment.
+     */
+    #[DataProvider('keyAcrossOperationsProvider')]
+    public function refusesOneKeyAcrossOperations(string $first, string $second): void
     {
-        $first = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'a'))->payment;
-        $second = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-2', idempotencyKey: 'b'))->payment;
+        $payment = $this->core->createPayment(Fixtures::authorizePayment(idempotencyKey: 'create-key'))->payment;
+        $calls = [
+            'create' => fn() => $this->core->createPayment(Fixtures::authorizePayment(operation: 'operation-2', idempotencyKey: 'shared-key')),
+            'capture' => fn() => $this->core->capturePayment($this->capture($payment, 'shared-key')),
+            'confirm' => fn() => $this->core->confirmPayment($this->operation($payment, 'shared-key')),
+            'cancel' => fn() => $this->core->cancelPayment($this->operation($payment, 'shared-key')),
+            'refund' => fn() => $this->core->createRefund($this->refund($payment, null, 'refund-1', 'shared-key')),
+        ];
+        $calls[$first]();
 
-        $this->core->capturePayment($this->capture($first, 'shared-key'));
-        $this->core->confirmPayment($this->operation($second, 'shared-key'));
-        $this->core->cancelPayment($this->operation($second, 'shared-key'));
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
+        $calls[$second]();
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function keyAcrossOperationsProvider(): iterable
+    {
+        yield 'create then capture' => ['create', 'capture'];
+        yield 'capture then cancel' => ['capture', 'cancel'];
+        yield 'capture then refund' => ['capture', 'refund'];
+        yield 'cancel then confirm' => ['cancel', 'confirm'];
+        yield 'cancel then create' => ['cancel', 'create'];
+    }
+
+    public function refusesTheCreateKeyForARefund(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment(idempotencyKey: 'create-key'))->payment;
+
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
+        $this->core->createRefund($this->refund($payment, null, 'refund-1', 'create-key'));
     }
 
     public function refusesConfirmKeyReusedForAnotherPayment(): void
     {
-        $first = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'a'))->payment;
-        $second = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-2', idempotencyKey: 'b'))->payment;
+        $first = $this->core->createPayment(Fixtures::pendingPayment(operation: 'operation-1', idempotencyKey: 'a'))->payment;
+        $second = $this->core->createPayment(Fixtures::pendingPayment(operation: 'operation-2', idempotencyKey: 'b'))->payment;
         $this->core->confirmPayment($this->operation($first, 'confirm-key'));
 
-        Expect::exception(\InvalidArgumentException::class)->withMessage('Idempotency key was reused with a different fake request');
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
         $this->core->confirmPayment($this->operation($second, 'confirm-key'));
     }
 
     public function refusesCancelKeyReusedForAnotherPayment(): void
     {
-        $first = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'a'))->payment;
-        $second = $this->core->createPayment(Fixtures::createPayment(operation: 'operation-2', idempotencyKey: 'b'))->payment;
+        $first = $this->core->createPayment(Fixtures::authorizePayment(operation: 'operation-1', idempotencyKey: 'a'))->payment;
+        $second = $this->core->createPayment(Fixtures::authorizePayment(operation: 'operation-2', idempotencyKey: 'b'))->payment;
         $this->core->cancelPayment($this->operation($first, 'cancel-key'));
 
-        Expect::exception(\InvalidArgumentException::class)->withMessage('Idempotency key was reused with a different fake request');
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
         $this->core->cancelPayment($this->operation($second, 'cancel-key'));
     }
 
@@ -221,7 +280,7 @@ final class FakeGatewayCoreTest
             idempotencyKey: 'refund-key',
         ));
 
-        Expect::exception(\InvalidArgumentException::class)->withMessage('Idempotency key was reused with a different fake request');
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
         $this->core->createRefund(new CreateRefundRequest(
             operationId: new OperationId(value: 'refund-2'),
             payment: $second,
@@ -319,17 +378,31 @@ final class FakeGatewayCoreTest
     }
 
     /**
-     * Capture is not state-gated, so a payment can be captured again for less
-     * than was already refunded; the balance is then empty, not negative.
+     * A partial capture takes less than the authorization; the amount stays
+     * the authorized one, and only what was captured can be refunded.
      */
-    public function aRecaptureBelowTheRefundedAmountLeavesNoBalance(): void
+    public function refundsNoMoreThanAPartialCaptureTook(): void
     {
-        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
-        $this->core->createRefund($this->refund($payment, new Money(minorUnits: 800, currency: 'EUR'), 'refund-1'));
-        $this->core->capturePayment($this->capture($payment, null, new Money(minorUnits: 100, currency: 'EUR')));
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
+        $captured = $this->core->capturePayment($this->capture($payment, null, new Money(minorUnits: 700, currency: 'EUR')));
+
+        Assert::same($captured->amount->minorUnits, 1_200);
+        Assert::same($captured->capturedAmount?->minorUnits, 700);
+
+        $refund = $this->core->createRefund($this->refund($payment, null, 'refund-1'));
+        Assert::same($refund->requestedAmount->minorUnits, 700);
 
         Expect::exception(RefundFailedException::class)->withMessage('Fake payment has no refundable balance left');
         $this->core->createRefund($this->refund($payment, new Money(minorUnits: 1, currency: 'EUR'), 'refund-2'));
+    }
+
+    public function refusesASecondCapture(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
+        $this->core->capturePayment($this->capture($payment, null, new Money(minorUnits: 100, currency: 'EUR')));
+
+        Expect::exception(PaymentException::class)->withMessage('Fake payment in state succeeded cannot be captured');
+        $this->core->capturePayment($this->capture($payment, null, new Money(minorUnits: 100, currency: 'EUR')));
     }
 
     public function refusesACaptureAboveTheAuthorizedAmount(): void
@@ -356,59 +429,67 @@ final class FakeGatewayCoreTest
         $payment = $core->createPayment(Fixtures::createPayment())->payment;
 
         $captured = $core->capturePayment($this->capture($payment, null, new Money(minorUnits: 1_200, currency: 'EUR')));
+        $full = $this->core->capturePayment($this->capture($this->core->createPayment(Fixtures::authorizePayment())->payment, null));
 
         Assert::same($captured->amount->minorUnits, 1_200);
+        Assert::same($captured->capturedAmount?->minorUnits, 1_200);
         Assert::same($captured->state, PaymentState::Succeeded);
+        Assert::same($full->capturedAmount?->minorUnits, 1_200);
     }
 
     /**
      * A replay is answered from the saved response; it does not execute the
-     * operation a second time over whatever happened since.
+     * operation a second time over whatever happened since, and the state
+     * gate does not refuse it.
      */
     public function replayedOperationsReturnTheSavedResponse(): void
     {
-        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresAction));
-        $payment = $core->createPayment(Fixtures::createPayment())->payment;
-        $confirmed = $core->confirmPayment($this->operation($payment, 'confirm-key'));
-        $core->cancelPayment($this->operation($payment, 'cancel-key'));
+        $payment = $this->core->createPayment(new CreatePaymentRequest(
+            operationId: new OperationId(value: 'operation-1'),
+            amount: new Money(minorUnits: 1_200, currency: 'EUR'),
+            paymentMethod: new PaymentMethodReference(id: 'pm_1'),
+            captureMethod: CaptureMethod::Manual,
+            confirmationMethod: ConfirmationMethod::Manual,
+        ))->payment;
+        $confirmed = $this->core->confirmPayment($this->operation($payment, 'confirm-key'));
+        $this->core->cancelPayment($this->operation($payment, 'cancel-key'));
 
-        $replayed = $core->confirmPayment(new PaymentOperationRequest(
+        $replayed = $this->core->confirmPayment(new PaymentOperationRequest(
             operationId: new OperationId(value: 'operation-replay'),
             payment: $payment,
             idempotencyKey: 'confirm-key',
         ));
 
-        Assert::same($confirmed->state, PaymentState::Processing);
-        Assert::same($replayed->state, PaymentState::Processing);
+        Assert::same($confirmed->state, PaymentState::RequiresCapture);
+        Assert::same($replayed->state, PaymentState::RequiresCapture);
         Assert::same($replayed->operationId->value, 'operation-replay');
-        Assert::same($this->stateOf($core, $payment), PaymentState::Canceled);
+        Assert::same($this->stateOf($this->core, $payment), PaymentState::Canceled);
     }
 
     public function replayedCaptureReturnsTheSavedResponse(): void
     {
-        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
-        $payment = $core->createPayment(Fixtures::createPayment())->payment;
-        $core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 500, currency: 'EUR')));
-        $core->cancelPayment($this->operation($payment, 'cancel-key'));
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
+        $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 500, currency: 'EUR')));
+        $this->core->createRefund($this->refund($payment, null));
 
-        $replayed = $core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 500, currency: 'EUR')));
+        $replayed = $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 500, currency: 'EUR')));
 
         Assert::same($replayed->state, PaymentState::Succeeded);
-        Assert::same($replayed->amount->minorUnits, 500);
-        Assert::same($this->stateOf($core, $payment), PaymentState::Canceled);
+        Assert::same($replayed->capturedAmount?->minorUnits, 500);
+        Assert::same($replayed->amount->minorUnits, 1_200);
     }
 
     public function replayedCancelReturnsTheSavedResponse(): void
     {
-        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresAction));
-        $payment = $core->createPayment(Fixtures::createPayment())->payment;
-        $core->cancelPayment($this->operation($payment, 'cancel-key'));
-        $core->confirmPayment($this->operation($payment, 'confirm-key'));
+        $payment = $this->core->createPayment(Fixtures::pendingPayment())->payment;
+        $this->core->cancelPayment($this->operation($payment, 'cancel-key'));
 
-        $replayed = $core->cancelPayment($this->operation($payment, 'cancel-key'));
+        $replayed = $this->core->cancelPayment($this->operation($payment, 'cancel-key'));
 
         Assert::same($replayed->state, PaymentState::Canceled);
-        Assert::same($this->stateOf($core, $payment), PaymentState::Processing);
+
+        Expect::exception(PaymentException::class)->withMessage('Fake payment in state canceled cannot be canceled');
+        $this->core->cancelPayment($this->operation($payment, 'cancel-key-2'));
     }
 
     public function aRefusedRefundLeavesTheKeyFree(): void
@@ -426,29 +507,242 @@ final class FakeGatewayCoreTest
     }
 
     /**
-     * Any sequence of captures, refunds and cancels, keyed from a small
-     * shared pool, keeps the fake in step with a model of the money a
-     * provider allows. The replay and over-refund defects of 0.1.2 each fail
-     * this within a few steps.
+     * Without a pinned state the fake answers a create as a provider does.
      */
-    #[Property(runs: 200)]
-    public function ledgerAgreesWithAProviderModel(RuleSequence $sequence): void
+    #[DataProvider('createdStateProvider')]
+    public function derivesTheCreatedStateFromTheRequest(
+        bool $withMethod,
+        CaptureMethod $capture,
+        ConfirmationMethod $confirmation,
+        PaymentState $state,
+        int $captured,
+    ): void {
+        $attempt = $this->core->createPayment(new CreatePaymentRequest(
+            operationId: new OperationId(value: 'operation-1'),
+            amount: new Money(minorUnits: 1_200, currency: 'EUR'),
+            paymentMethod: $withMethod ? new PaymentMethodReference(id: 'pm_1') : null,
+            captureMethod: $capture,
+            confirmationMethod: $confirmation,
+        ));
+
+        Assert::same($attempt->state, $state);
+        Assert::same($attempt->amount->minorUnits, 1_200);
+        Assert::same($attempt->capturedAmount?->minorUnits, $captured);
+        Assert::same($attempt->capturedAmount?->currency, 'EUR');
+    }
+
+    /** @return iterable<string, array{bool, CaptureMethod, ConfirmationMethod, PaymentState, int}> */
+    public static function createdStateProvider(): iterable
+    {
+        yield 'paid' => [true, CaptureMethod::Automatic, ConfirmationMethod::Automatic, PaymentState::Succeeded, 1_200];
+        yield 'authorized' => [true, CaptureMethod::Manual, ConfirmationMethod::Automatic, PaymentState::RequiresCapture, 0];
+        yield 'awaiting confirmation' => [true, CaptureMethod::Automatic, ConfirmationMethod::Manual, PaymentState::Pending, 0];
+        yield 'awaiting confirmation, manual capture' => [true, CaptureMethod::Manual, ConfirmationMethod::Manual, PaymentState::Pending, 0];
+        yield 'deferred' => [false, CaptureMethod::Automatic, ConfirmationMethod::Automatic, PaymentState::RequiresPaymentMethod, 0];
+        yield 'deferred, manual everything' => [false, CaptureMethod::Manual, ConfirmationMethod::Manual, PaymentState::RequiresPaymentMethod, 0];
+    }
+
+    public function aPinnedCreateStateWins(): void
+    {
+        $paid = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::Succeeded));
+        $processing = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::Processing));
+
+        $succeeded = $paid->createPayment(Fixtures::authorizePayment());
+        $pending = $processing->createPayment(Fixtures::createPayment());
+
+        Assert::same($succeeded->state, PaymentState::Succeeded);
+        Assert::same($succeeded->capturedAmount?->minorUnits, 1_200);
+        Assert::same($pending->state, PaymentState::Processing);
+        Assert::same($pending->capturedAmount?->minorUnits, 0);
+    }
+
+    #[DataProvider('notCapturableProvider')]
+    public function capturesOnlyAnAuthorization(PaymentState $state): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: $state));
+        $payment = $core->createPayment(Fixtures::authorizePayment())->payment;
+
+        Expect::exception(PaymentException::class)->withMessage('Fake payment in state ' . $state->value . ' cannot be captured');
+        $core->capturePayment($this->capture($payment, 'capture-key'));
+    }
+
+    /** @return iterable<string, array{PaymentState}> */
+    public static function notCapturableProvider(): iterable
+    {
+        foreach (PaymentState::cases() as $state) {
+            if ($state !== PaymentState::RequiresCapture) {
+                yield $state->value => [$state];
+            }
+        }
+    }
+
+    /**
+     * A refused capture leaves its key free: nothing was saved for it.
+     */
+    public function aRefusedCaptureLeavesTheKeyFree(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
+
+        try {
+            $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 5_000, currency: 'EUR')));
+        } catch (PaymentException) {
+        }
+
+        $captured = $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 500, currency: 'EUR')));
+
+        Assert::same($captured->capturedAmount?->minorUnits, 500);
+    }
+
+    #[DataProvider('cancelProvider')]
+    public function cancelsOnlyAnUnfinishedPayment(PaymentState $state, bool $cancelable): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: $state));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+
+        if (!$cancelable) {
+            Expect::exception(PaymentException::class)->withMessage('Fake payment in state ' . $state->value . ' cannot be canceled');
+        }
+
+        $canceled = $core->cancelPayment($this->operation($payment, 'cancel-key'));
+
+        Assert::same($canceled->state, PaymentState::Canceled);
+        Assert::same($canceled->amount->minorUnits, 1_200);
+        Assert::same($canceled->capturedAmount?->minorUnits, 0);
+        Assert::same($this->stateOf($core, $payment), PaymentState::Canceled);
+    }
+
+    /** @return iterable<string, array{PaymentState, bool}> */
+    public static function cancelProvider(): iterable
+    {
+        yield 'pending' => [PaymentState::Pending, true];
+        yield 'requires payment method' => [PaymentState::RequiresPaymentMethod, true];
+        yield 'requires action' => [PaymentState::RequiresAction, true];
+        yield 'requires capture' => [PaymentState::RequiresCapture, true];
+        yield 'processing' => [PaymentState::Processing, true];
+        yield 'succeeded' => [PaymentState::Succeeded, false];
+        yield 'failed' => [PaymentState::Failed, false];
+        yield 'canceled' => [PaymentState::Canceled, false];
+    }
+
+    #[DataProvider('confirmProvider')]
+    public function confirmsOnlyAPaymentAwaitingConfirmation(PaymentState $state, CaptureMethod $capture, ?PaymentState $confirmed, int $captured): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: $state));
+        $payment = $core->createPayment(new CreatePaymentRequest(
+            operationId: new OperationId(value: 'operation-1'),
+            amount: new Money(minorUnits: 1_200, currency: 'EUR'),
+            paymentMethod: new PaymentMethodReference(id: 'pm_1'),
+            captureMethod: $capture,
+        ))->payment;
+
+        if (!$confirmed instanceof \Rasuvaeff\Payments\PaymentState) {
+            Expect::exception(PaymentException::class)->withMessage('Fake payment in state ' . $state->value . ' cannot be confirmed');
+        }
+
+        $attempt = $core->confirmPayment($this->operation($payment, 'confirm-key'));
+
+        Assert::same($attempt->state, $confirmed);
+        Assert::same($attempt->capturedAmount?->minorUnits, $captured);
+        Assert::same($this->stateOf($core, $payment), $confirmed);
+    }
+
+    /** @return iterable<string, array{PaymentState, CaptureMethod, ?PaymentState, int}> */
+    public static function confirmProvider(): iterable
+    {
+        yield 'pending, automatic capture' => [PaymentState::Pending, CaptureMethod::Automatic, PaymentState::Succeeded, 1_200];
+        yield 'pending, manual capture' => [PaymentState::Pending, CaptureMethod::Manual, PaymentState::RequiresCapture, 0];
+        yield 'requires action, automatic capture' => [PaymentState::RequiresAction, CaptureMethod::Automatic, PaymentState::Succeeded, 1_200];
+        yield 'requires action, manual capture' => [PaymentState::RequiresAction, CaptureMethod::Manual, PaymentState::RequiresCapture, 0];
+
+        foreach ([PaymentState::RequiresPaymentMethod, PaymentState::RequiresCapture, PaymentState::Processing, PaymentState::Succeeded, PaymentState::Failed, PaymentState::Canceled] as $state) {
+            yield $state->value => [$state, CaptureMethod::Automatic, null, 0];
+        }
+    }
+
+    public function aSimulatedTransitionMovesThePayment(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresAction));
+        $action = $core->createPayment(Fixtures::createPayment())->payment;
+
+        $moved = $core->transition(payment: $action, state: PaymentState::Succeeded, operationId: new OperationId(value: 'webhook-1'));
+
+        Assert::same($moved->state, PaymentState::Succeeded);
+        Assert::same($moved->operationId->value, 'webhook-1');
+        Assert::same($moved->capturedAmount?->minorUnits, 1_200);
+        Assert::same($this->stateOf($core, $action), PaymentState::Succeeded);
+    }
+
+    /**
+     * A partial capture already took money: settling it as succeeded again
+     * keeps what was captured instead of claiming the whole authorization.
+     */
+    public function aSimulatedTransitionKeepsACapturedAmount(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
+        $this->core->capturePayment($this->capture($payment, null, new Money(minorUnits: 300, currency: 'EUR')));
+
+        $moved = $this->core->transition(payment: $payment, state: PaymentState::Succeeded, operationId: new OperationId(value: 'webhook-1'));
+
+        Assert::same($moved->capturedAmount?->minorUnits, 300);
+    }
+
+    public function aSimulatedTransitionToAnotherStateKeepsNothingCaptured(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
+
+        $moved = $this->core->transition(payment: $payment, state: PaymentState::Processing, operationId: new OperationId(value: 'webhook-1'));
+
+        Assert::same($moved->state, PaymentState::Processing);
+        Assert::same($moved->capturedAmount?->minorUnits, 0);
+    }
+
+    public function refusesASimulatedTransitionTheStateMapForbids(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+
+        Expect::exception(\InvalidArgumentException::class)->withMessage('Fake payment cannot move from succeeded to pending');
+        $this->core->transition(payment: $payment, state: PaymentState::Pending, operationId: new OperationId(value: 'webhook-1'));
+    }
+
+    /**
+     * Any sequence of captures, confirms, cancels, refunds and replays on a
+     * payment created in any of the usual ways, keyed from a small pool
+     * shared by every operation, keeps the fake in step with a model of what
+     * a provider allows. The replay and over-refund defects of 0.1.2 and the
+     * ungated capture and cancel of 0.1.x each fail this within a few steps.
+     *
+     * @param value-of<FakeLedgerMachine::SCENARIOS> $scenario
+     */
+    #[Property(runs: 300)]
+    public function ledgerAgreesWithAProviderModel(string $scenario, RuleSequence $sequence): void
     {
         $machine = null;
-        $sequence->run(static function () use (&$machine): FakeLedgerMachine {
-            return $machine = new FakeLedgerMachine();
+        $sequence->run(static function () use (&$machine, $scenario): FakeLedgerMachine {
+            return $machine = new FakeLedgerMachine($scenario);
         });
         \assert($machine instanceof FakeLedgerMachine);
 
-        foreach (['refund accepted', 'refund refused', 'refund replayed', 'capture refused', 'capture replayed', 'key conflict'] as $label) {
-            Classify::cover(isset($machine->seen[$label]), $label, 5);
+        foreach (self::LEDGER_BRANCHES as $label => $minimum) {
+            Classify::cover(isset($machine->seen[$label]), $label, $minimum);
         }
     }
 
     /** @return array<string, ArbitraryInterface> */
     public static function ledgerAgreesWithAProviderModelGenerators(): array
     {
-        return ['sequence' => Gen::rules(FakeLedgerMachine::class, minLength: 0, maxLength: 25)];
+        return [
+            // Captures need an authorization; weight the scenarios that
+            // hold one so capture replays are not a rare event.
+            'scenario' => Gen::frequency([
+                [4, Gen::constant('authorized')],
+                [2, Gen::constant('confirm and capture')],
+                [1, Gen::constant('paid')],
+                [1, Gen::constant('confirm')],
+                [1, Gen::constant('requires action')],
+                [1, Gen::constant('deferred')],
+            ]),
+            'sequence' => Gen::rules(FakeLedgerMachine::class, minLength: 0, maxLength: 25),
+        ];
     }
 
     public function rejectsRefundReferenceOfAnotherProvider(): void

@@ -7,6 +7,7 @@ namespace Rasuvaeff\PaymentsTesting\Tests;
 use Rasuvaeff\Payments\CapabilitySet;
 use Rasuvaeff\Payments\CaptureGatewayInterface;
 use Rasuvaeff\Payments\CreatePaymentRequest;
+use Rasuvaeff\Payments\IdempotencyConflictException;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
 use Rasuvaeff\Payments\PartialRefundCapability;
@@ -74,7 +75,7 @@ final class FakePaymentGatewayTest
         $gateway = new FakePaymentGateway();
         $gateway->createPayment(Fixtures::createPayment());
 
-        Expect::exception(\InvalidArgumentException::class)->withMessageContaining('Idempotency key');
+        Expect::exception(IdempotencyConflictException::class)->withMessageContaining('Idempotency key');
         $gateway->createPayment(new CreatePaymentRequest(
             operationId: new OperationId(value: 'operation-1'),
             amount: new Money(minorUnits: 1_201, currency: 'EUR'),
@@ -102,7 +103,7 @@ final class FakePaymentGatewayTest
         $gateway = new FakePaymentGateway();
         $gateway->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'shared-key'));
 
-        Expect::exception(\InvalidArgumentException::class)->withMessageContaining('Idempotency key');
+        Expect::exception(IdempotencyConflictException::class)->withMessageContaining('Idempotency key');
         $gateway->createPayment(new CreatePaymentRequest(
             operationId: new OperationId(value: 'operation-2'),
             amount: new Money(minorUnits: 9_999, currency: 'EUR'),
