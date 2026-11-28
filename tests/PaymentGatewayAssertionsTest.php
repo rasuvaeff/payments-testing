@@ -190,7 +190,7 @@ final class PaymentGatewayAssertionsTest
         Assert::same($gateway->received, [
             ['key-probe', 100],
             ['key-probe', 100],
-            ['key-probe-contract-other', 100],
+            ['contract-other-26deb36bf3fcc1b3', 100],
             ['key-probe', 101],
         ]);
     }
@@ -219,9 +219,30 @@ final class PaymentGatewayAssertionsTest
         Assert::same($gateway->received, [
             ['key-ceiling', PHP_INT_MAX],
             ['key-ceiling', PHP_INT_MAX],
-            ['key-ceiling-contract-other', PHP_INT_MAX],
+            ['contract-other-b94ed1c23dd84527', PHP_INT_MAX],
             ['key-ceiling', PHP_INT_MAX - 1],
         ]);
+    }
+
+    /**
+     * The different key is derived from the original at a fixed length, so a
+     * key near the core's 255-byte cap — or PayPal's 108 — still leaves room:
+     * appending a suffix made the probe itself throw
+     * `InvalidArgumentException` before the gateway was asked anything. (250
+     * bytes: the double derives a reference id of the key plus 4 bytes.)
+     */
+    public function probesALongKeyWithAKeyThatFits(): void
+    {
+        $gateway = new FixtureGateway();
+        $key = str_repeat('k', 250);
+
+        try {
+            PaymentGatewayAssertions::assertCreatePaymentIdempotency($gateway, $this->createRequest('operation-long', $key));
+        } catch (\InvalidArgumentException) {
+            // The double refuses the reuse probe, which is the expected contract.
+        }
+
+        Assert::same(\array_column($gateway->received, 0), [$key, $key, 'contract-other-' . substr(hash('sha256', $key), 0, 16), $key]);
     }
 
     /**

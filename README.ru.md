@@ -191,7 +191,7 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 |---|---|---|
 | `PaymentGatewayAssertions` | `assertCapabilities()` | `PartialRefundCapability` требует `RefundGatewayInterface` |
 | `PaymentGatewayAssertions` | `assertCreatePayment()` | Консистентность провайдера, сохранение operation id и amount |
-| `PaymentGatewayAssertions` | `assertCreatePaymentIdempotency()` | Повтор ключа возвращает тот же платёж, **другой** ключ начинает новый, а переиспользование ключа с изменённым запросом отвергается |
+| `PaymentGatewayAssertions` | `assertCreatePaymentIdempotency()` | Повтор ключа возвращает тот же платёж, **другой** ключ (`contract-other-` и 16 hex-символов SHA-256 ключа, 31 байт при любой длине ключа) начинает новый, а переиспользование ключа с изменённым запросом отвергается |
 | `PaymentGatewayAssertions` | `assertRetrievePayment()` | Консистентность провайдера, сохранение operation id и payment reference |
 | `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture сохраняет operation id, провайдер консистентен; `capturedAmount` (брутто, сколько взято) — по исходу: capture в `Succeeded` сообщает ровно запрошенную сумму (`amount` платежа, если суммы нет), в `Failed` или `Pending` — ноль или `null`, в любом другом (`Processing`) — `null` или не больше запрошенного, всегда в валюте запроса; `amount` остаётся авторизацией и не сравнивается, как и payment reference (PayPal отвечает reference самого capture) |
 | `CaptureGatewayAssertions` | `assertCapturePaymentIdempotency()` | Повтор ключа возвращает ту же reference, сумму, захваченную сумму и состояние, а переиспользование ключа с изменённой суммой (на единицу от захваченной) отвергается |
@@ -200,7 +200,7 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 | `CancelGatewayAssertions` | `assertCancelPayment()` | Cancel сохраняет operation id и payment reference |
 | `CancelGatewayAssertions` | `assertCancelPaymentIdempotency()` | Повтор ключа возвращает то же состояние |
 | `RefundGatewayAssertions` | `assertCreateRefund()` | Консистентность provider/payment/refund, сохранение requested amount |
-| `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Повтор ключа возвращает тот же возврат, **другой** ключ начинает новый, а переиспользование ключа с изменённой суммой отвергается |
+| `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Повтор ключа возвращает тот же возврат, **другой** ключ (выведенный так же) начинает новый, а переиспользование ключа с изменённой суммой отвергается |
 | `RefundGatewayAssertions` | `assertRetrieveRefund()` | Консистентность провайдера, сохранение operation id и refund reference |
 
 Capability-специфичные классы требуют intersection-тип

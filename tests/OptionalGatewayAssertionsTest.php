@@ -118,7 +118,7 @@ final class OptionalGatewayAssertionsTest
         Assert::same($gateway->refundsReceived, [
             ['refund-key', 25],
             ['refund-key', 25],
-            ['refund-key-contract-other', 25],
+            ['contract-other-92d8334b701afc93', 25],
             ['refund-key', 24],
         ]);
     }
@@ -142,9 +142,23 @@ final class OptionalGatewayAssertionsTest
         Assert::same($gateway->refundsReceived, [
             ['refund-key', 1],
             ['refund-key', 1],
-            ['refund-key-contract-other', 1],
+            ['contract-other-92d8334b701afc93', 1],
             ['refund-key', 2],
         ]);
+    }
+
+    public function probesALongRefundKeyWithAKeyThatFits(): void
+    {
+        $gateway = new FixtureGateway();
+        $key = str_repeat('r', 250);
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, new CreateRefundRequest(
+            operationId: new OperationId('refund-1'),
+            payment: new PaymentReference($gateway->provider(), 'pay_1'),
+            amount: new Money(25, 'EUR'),
+            idempotencyKey: $key,
+        ));
+
+        Assert::same(\array_column($gateway->refundsReceived, 0), [$key, $key, 'contract-other-' . substr(hash('sha256', $key), 0, 16), $key]);
     }
 
     private function keyedRefund(): CreateRefundRequest

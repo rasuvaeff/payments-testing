@@ -40,5 +40,18 @@ final class KeyReuseProbe
         return false;
     }
 
+    /**
+     * A key other than `$key`, for the "a different key starts a new
+     * operation" half: derived from it at a fixed 31 bytes, so it fits every
+     * provider cap however long the original is (the core allows 255 bytes,
+     * PayPal 108). Appending a suffix overflowed those caps.
+     *
+     * @return non-empty-string
+     */
+    public static function otherKey(string $key): string
+    {
+        return 'contract-other-' . substr(hash('sha256', $key), 0, 16);
+    }
+
     private function __construct() {}
 }

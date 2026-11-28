@@ -187,7 +187,7 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 |---|---|---|
 | `PaymentGatewayAssertions` | `assertCapabilities()` | `PartialRefundCapability` implies `RefundGatewayInterface` |
 | `PaymentGatewayAssertions` | `assertCreatePayment()` | Provider consistency, operation id and amount preserved |
-| `PaymentGatewayAssertions` | `assertCreatePaymentIdempotency()` | Replaying a key returns the same payment, a **different** key starts a new one, and reusing a key with a changed request is refused |
+| `PaymentGatewayAssertions` | `assertCreatePaymentIdempotency()` | Replaying a key returns the same payment, a **different** key (`contract-other-` plus 16 hex characters of the key's SHA-256, 31 bytes whatever the key's length) starts a new one, and reusing a key with a changed request is refused |
 | `PaymentGatewayAssertions` | `assertRetrievePayment()` | Provider consistency, operation id and payment reference preserved |
 | `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture preserves operation id, provider consistent; `capturedAmount` (gross, what was taken) by outcome: a `Succeeded` capture reports exactly the requested amount (the payment's `amount` without one), a `Failed` or `Pending` one zero or `null`, any other (`Processing`) `null` or no more than requested, always in the request's currency; `amount` stays the authorization and is not compared, nor is the payment reference (PayPal answers with the capture's) |
 | `CaptureGatewayAssertions` | `assertCapturePaymentIdempotency()` | Replaying a key returns the same reference, amount, captured amount and state, and reusing the key with a changed amount (one unit off the captured amount) is refused |
@@ -196,7 +196,7 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 | `CancelGatewayAssertions` | `assertCancelPayment()` | Cancel preserves operation id and payment reference |
 | `CancelGatewayAssertions` | `assertCancelPaymentIdempotency()` | Replaying a key returns the same state |
 | `RefundGatewayAssertions` | `assertCreateRefund()` | Refund provider/payment/refund consistency, requested amount preserved |
-| `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Replaying a key returns the same refund, a **different** key starts a new one, and reusing a key with a changed amount is refused |
+| `RefundGatewayAssertions` | `assertCreateRefundIdempotency()` | Replaying a key returns the same refund, a **different** key (derived the same way) starts a new one, and reusing a key with a changed amount is refused |
 | `RefundGatewayAssertions` | `assertRetrieveRefund()` | Provider consistency, operation id and refund reference preserved |
 
 Capability-specific classes require the intersection type

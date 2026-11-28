@@ -64,7 +64,7 @@ final class PaymentGatewayAssertions
         $second = self::assertCreatePayment($gateway, $request);
         AttemptAssertions::same($second->payment, $first->payment, 'Payment idempotency key produced another reference');
 
-        $otherKey = self::assertCreatePayment($gateway, self::withKey(request: $request, key: $key . '-contract-other'));
+        $otherKey = self::assertCreatePayment($gateway, self::withKey(request: $request, key: KeyReuseProbe::otherKey($key)));
 
         if ($otherKey->payment->id === $first->payment->id) {
             throw new ContractViolationException('A different idempotency key returned the original payment reference');

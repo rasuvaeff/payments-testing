@@ -48,7 +48,7 @@ final class RefundGatewayAssertions
         $second = self::assertCreateRefund($gateway, $request);
         AttemptAssertions::same($second->refund, $first->refund, 'Refund idempotency key produced another reference');
 
-        $otherKey = self::assertCreateRefund($gateway, self::withKey(request: $request, key: $key . '-contract-other'));
+        $otherKey = self::assertCreateRefund($gateway, self::withKey(request: $request, key: KeyReuseProbe::otherKey($key)));
 
         if ($otherKey->refund->id === $first->refund->id) {
             throw new ContractViolationException('A different idempotency key returned the original refund reference');

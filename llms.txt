@@ -107,7 +107,7 @@ only ever sees the header value. Capture/confirm/cancel/refund idempotency asser
 `InvalidArgumentException` when `idempotencyKey` is null; a create request
 always has one (given or generated UUID v4). `assertCreatePaymentIdempotency` and `assertCreateRefundIdempotency` probe
 all three halves of the contract — same key returns the original payment, a different key
-(`<key>-contract-other`) starts a new one, and the original key with a changed
+(`contract-other-` + 16 hex chars of `sha256(<key>)`, 31 bytes, fits any provider cap) starts a new one, and the original key with a changed
 amount must be refused — so a gateway that ignores the key cannot pass. The
 create probe asks for `amount + 1` (`- 1` at `PHP_INT_MAX`); the refund probe
 asks for `amount - 1` (`+ 1` when the amount is 0 or 1), so an ordinary balance
