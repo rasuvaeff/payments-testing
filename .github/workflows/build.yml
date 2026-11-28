@@ -98,7 +98,7 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: none
-          extensions: json
+          extensions: json, mbstring
           tools: composer:v2
 
       - name: Resolve the Composer cache directory
@@ -159,7 +159,7 @@ jobs:
         with:
           php-version: '8.3'
           coverage: none
-          extensions: json
+          extensions: json, mbstring
           tools: composer:v2
 
       - name: Resolve the Composer cache directory
@@ -196,7 +196,7 @@ jobs:
         with:
           php-version: '8.4'
           coverage: pcov
-          extensions: json
+          extensions: json, mbstring
           tools: composer:v2
 
       - name: Resolve the Composer cache directory
@@ -213,8 +213,24 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
+      - name: Restore property regression corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/property-db
+          key: property-db-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: property-db-
+
       - name: Test with coverage
+        env:
+          PROPERTY_DB: ${{ github.workspace }}/build/property-db
         run: composer test:coverage:ci
+
+      - name: Save property regression corpus
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/property-db
+          key: property-db-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Mutation testing
         run: composer mutation
@@ -239,7 +255,7 @@ jobs:
           # version is enough; 8.5 is the newest it installs on (~8.4 || ~8.5).
           php-version: '8.5'
           coverage: none
-          extensions: json, bcmath, intl
+          extensions: json, mbstring, bcmath, intl
           tools: composer:v2
 
       - name: Resolve the Composer cache directory

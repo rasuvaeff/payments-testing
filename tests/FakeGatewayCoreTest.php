@@ -21,6 +21,12 @@ use Rasuvaeff\Payments\RetrievePaymentRequest;
 use Rasuvaeff\Payments\RetrieveRefundRequest;
 use Rasuvaeff\PaymentsTesting\FakeGatewayConfig;
 use Rasuvaeff\PaymentsTesting\Internal\FakeGatewayCore;
+use Rasuvaeff\PaymentsTesting\Tests\Support\FakeLedgerMachine;
+use Rasuvaeff\PropertyTesting\ArbitraryInterface;
+use Rasuvaeff\PropertyTesting\Classify;
+use Rasuvaeff\PropertyTesting\Gen;
+use Rasuvaeff\PropertyTesting\Property;
+use Rasuvaeff\PropertyTesting\StateMachine\RuleSequence;
 use Testo\Assert;
 use Testo\Assert\ExpectNoAssertions;
 use Testo\Codecov\Covers;
@@ -417,6 +423,32 @@ final class FakeGatewayCoreTest
         $refund = $this->core->createRefund($this->refund($payment, new Money(minorUnits: 500, currency: 'EUR'), 'refund-2', 'refund-key'));
 
         Assert::same($refund->requestedAmount->minorUnits, 500);
+    }
+
+    /**
+     * Any sequence of captures, refunds and cancels, keyed from a small
+     * shared pool, keeps the fake in step with a model of the money a
+     * provider allows. The replay and over-refund defects of 0.1.2 each fail
+     * this within a few steps.
+     */
+    #[Property(runs: 200)]
+    public function ledgerAgreesWithAProviderModel(RuleSequence $sequence): void
+    {
+        $machine = null;
+        $sequence->run(static function () use (&$machine): FakeLedgerMachine {
+            return $machine = new FakeLedgerMachine();
+        });
+        \assert($machine instanceof FakeLedgerMachine);
+
+        foreach (['refund accepted', 'refund refused', 'refund replayed', 'capture refused', 'capture replayed', 'key conflict'] as $label) {
+            Classify::cover(isset($machine->seen[$label]), $label, 5);
+        }
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    public static function ledgerAgreesWithAProviderModelGenerators(): array
+    {
+        return ['sequence' => Gen::rules(FakeLedgerMachine::class, minLength: 0, maxLength: 25)];
     }
 
     public function rejectsRefundReferenceOfAnotherProvider(): void
