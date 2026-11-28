@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.2.0 — 2026-11-28
+
+Review 2026-11-28 fixes (#9).
 
 - **Dependencies:** development constraints raised to the latest releases, one major each: `rasuvaeff/property-testing-testo` ^1.0 → ^1.4.1, `rasuvaeff/rector-named-literals` ^1.0 → ^1.0.2, `testo/bridge-infection` ^0.1.6 → ^0.1.9, `testo/testo` ^0.10.25 → ^0.10.62, `vimeo/psalm` ^7.0 → ^7.23. The new versions flag nothing. `.github/dependabot.yml` is added from the monorepo template (weekly grouped updates, `rasuvaeff/*` moved by hand). The Makefile mounts a persistent `COMPOSER_HOME` (template `DOCKER :=` line). The CI backward-compatibility step accepts breaks under a higher pre-1.0 minor heading (`## 0.2.0`), as the template does; it accepted them only under a higher major, so this release PR would have stayed red.
 - **Breaking:** the fakes gate operations by payment state, as Stripe and PayPal do. `capturePayment()` runs only from `RequiresCapture` (a second capture is refused); `confirmPayment()` only from `Pending` or `RequiresAction`, and moves to `RequiresCapture` for a manual-capture payment or `Succeeded` otherwise (it used to answer `Processing` from any state); `cancelPayment()` is refused for `Succeeded`, `Failed` and `Canceled`. A refused operation throws `PaymentException`. All of these ran from any state: a captured payment could be canceled, a canceled one captured.
