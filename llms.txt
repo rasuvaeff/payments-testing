@@ -69,6 +69,9 @@ Idempotency keys scope by the key alone, never by `OperationId`: a provider
 only ever sees the header value. Idempotency asserts throw
 `InvalidArgumentException` when `idempotencyKey` is null. `assertCreatePaymentIdempotency` and `assertCreateRefundIdempotency` probe
 all three halves of the contract — same key returns the original payment, a different key
-(`<key>-contract-other`) starts a new one, and the original key with
-`amount + 1` must be refused — so a gateway that ignores the key cannot pass.
+(`<key>-contract-other`) starts a new one, and the original key with a changed
+amount must be refused — so a gateway that ignores the key cannot pass. The
+create probe asks for `amount + 1` (`- 1` at `PHP_INT_MAX`); the refund probe
+asks for `amount - 1` (`+ 1` when the amount is 0 or 1), so an ordinary balance
+check cannot pass for idempotency enforcement.
 It therefore creates payments: run it against fakes or a sandbox.
