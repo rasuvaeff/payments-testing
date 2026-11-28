@@ -49,7 +49,24 @@ The fakes are fully deterministic:
 - A replayed `createPayment()` answers from the response saved for the key —
   the payment as it was created, stamped with the replay's `OperationId` — and
   leaves the stored payment alone. A payment captured after creation stays
-  captured; read its current state with `retrievePayment()`.
+  captured; read its current state with `retrievePayment()`. A replayed
+  `capturePayment()`, `confirmPayment()`, `cancelPayment()` or `createRefund()`
+  is answered from its saved response the same way: it does not run the
+  operation again, and a replayed refund does not count against the balance
+  twice.
+- The fakes refuse what a provider refuses with money: a refund of a payment
+  that is not `Succeeded`, a refund in another currency, a refund above the
+  balance left after earlier refunds (without an amount a refund takes the
+  remaining balance, so a second full refund is refused) —
+  `RefundFailedException`; a capture above the amount the payment was created
+  for, or in another currency — `PaymentException`. A refused request leaves
+  its idempotency key unused.
+- They do not model the provider's state machine for capture, confirm and
+  cancel: those run from any state (with the default `createState: Succeeded`,
+  `cancelPayment()` still answers `Canceled`). Idempotency keys are scoped per
+  operation, so a create key reused for a refund is accepted, where Stripe
+  refuses it. A captured payment reports the captured amount as its `amount`;
+  Stripe keeps the authorized amount there.
 - Reusing a key with different request data throws; calls without a key
   receive distinct deterministic references.
 - References from another provider and unknown references are rejected.

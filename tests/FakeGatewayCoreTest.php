@@ -9,10 +9,12 @@ use Rasuvaeff\Payments\CreatePaymentRequest;
 use Rasuvaeff\Payments\CreateRefundRequest;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
+use Rasuvaeff\Payments\PaymentException;
 use Rasuvaeff\Payments\PaymentOperationRequest;
 use Rasuvaeff\Payments\PaymentProvider;
 use Rasuvaeff\Payments\PaymentReference;
 use Rasuvaeff\Payments\PaymentState;
+use Rasuvaeff\Payments\RefundFailedException;
 use Rasuvaeff\Payments\RefundReason;
 use Rasuvaeff\Payments\RefundReference;
 use Rasuvaeff\Payments\RetrievePaymentRequest;
@@ -22,6 +24,7 @@ use Rasuvaeff\PaymentsTesting\Internal\FakeGatewayCore;
 use Testo\Assert;
 use Testo\Assert\ExpectNoAssertions;
 use Testo\Codecov\Covers;
+use Testo\Data\DataProvider;
 use Testo\Expect;
 use Testo\Lifecycle\BeforeTest;
 use Testo\Test;
@@ -89,12 +92,14 @@ final class FakeGatewayCoreTest
         $plain = $this->withoutPhpDiagnostics(fn() => $this->core->createRefund(new CreateRefundRequest(
             operationId: new OperationId(value: 'refund-1'),
             payment: $payment,
+            amount: new Money(minorUnits: 500, currency: 'EUR'),
         )));
-        $reasoned = $this->core->createRefund(new CreateRefundRequest(
+        // No amount: the null-safe reads of the amount run as well.
+        $reasoned = $this->withoutPhpDiagnostics(fn() => $this->core->createRefund(new CreateRefundRequest(
             operationId: new OperationId(value: 'refund-2'),
             payment: $payment,
             reason: new RefundReason(value: 'duplicate'),
-        ));
+        )));
 
         Assert::same($plain->refund->id, 'ref_abdd6650f0131c35');
         Assert::true($reasoned->refund->id !== $plain->refund->id);
@@ -133,7 +138,7 @@ final class FakeGatewayCoreTest
     {
         $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
         $created = $core->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'create-key'));
-        $core->capturePayment($this->capture($created->payment, null, new Money(minorUnits: 5_000, currency: 'EUR')));
+        $core->capturePayment($this->capture($created->payment, null, new Money(minorUnits: 500, currency: 'EUR')));
 
         $replayed = $core->createPayment(Fixtures::createPayment(operation: 'operation-2', idempotencyKey: 'create-key'));
         $current = $core->retrievePayment(new RetrievePaymentRequest(
@@ -147,7 +152,7 @@ final class FakeGatewayCoreTest
         Assert::same($replayed->amount->minorUnits, 1_200);
         Assert::same($replayed->createdAt, $created->createdAt);
         Assert::same($current->state, PaymentState::Succeeded);
-        Assert::same($current->amount->minorUnits, 5_000);
+        Assert::same($current->amount->minorUnits, 500);
     }
 
     public function replaysCaptureWithTheSameKeyAndRequest(): void
@@ -218,6 +223,202 @@ final class FakeGatewayCoreTest
         ));
     }
 
+    /**
+     * A provider refuses a refund it cannot honour. A double that accepts it
+     * lets an application test pass a refund path that fails in production.
+     */
+    public function refusesARefundAboveThePaymentAmount(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+
+        Expect::exception(RefundFailedException::class)->withMessage('Refund amount exceeds the refundable balance of the fake payment');
+        $this->core->createRefund($this->refund($payment, new Money(minorUnits: 1_201, currency: 'EUR')));
+    }
+
+    public function refusesARefundInAnotherCurrency(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+
+        Expect::exception(RefundFailedException::class)->withMessage('Refund currency differs from the fake payment currency');
+        $this->core->createRefund($this->refund($payment, new Money(minorUnits: 500, currency: 'USD')));
+    }
+
+    public function refusesASecondFullRefund(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+        $this->core->createRefund($this->refund($payment, null, 'refund-1'));
+
+        Expect::exception(RefundFailedException::class)->withMessage('Fake payment has no refundable balance left');
+        $this->core->createRefund($this->refund($payment, null, 'refund-2'));
+    }
+
+    public function partialRefundsShareTheBalance(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+        $first = $this->core->createRefund($this->refund($payment, new Money(minorUnits: 500, currency: 'EUR'), 'refund-1'));
+        $rest = $this->core->createRefund($this->refund($payment, null, 'refund-2'));
+
+        Assert::same($first->requestedAmount->minorUnits, 500);
+        Assert::same($rest->requestedAmount->minorUnits, 700);
+        Assert::same($rest->actualAmount?->minorUnits, 700);
+
+        Expect::exception(RefundFailedException::class)->withMessage('Fake payment has no refundable balance left');
+        $this->core->createRefund($this->refund($payment, new Money(minorUnits: 1, currency: 'EUR'), 'refund-3'));
+    }
+
+    public function refusesAPartialRefundAboveTheRemainingBalance(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+        $this->core->createRefund($this->refund($payment, new Money(minorUnits: 1_000, currency: 'EUR'), 'refund-1'));
+
+        Expect::exception(RefundFailedException::class)->withMessage('Refund amount exceeds the refundable balance of the fake payment');
+        $this->core->createRefund($this->refund($payment, new Money(minorUnits: 201, currency: 'EUR'), 'refund-2'));
+    }
+
+    /**
+     * @param non-empty-string $state
+     */
+    #[DataProvider('unpaidStateProvider')]
+    public function refusesARefundOfAPaymentThatIsNotPaid(PaymentState $state): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: $state));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+
+        Expect::exception(RefundFailedException::class)->withMessage('Only a succeeded fake payment can be refunded');
+        $core->createRefund($this->refund($payment, null));
+    }
+
+    /** @return iterable<string, array{PaymentState}> */
+    public static function unpaidStateProvider(): iterable
+    {
+        foreach (PaymentState::cases() as $state) {
+            if ($state !== PaymentState::Succeeded) {
+                yield $state->value => [$state];
+            }
+        }
+    }
+
+    public function replayedRefundIsNotCountedTwice(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+        $first = $this->core->createRefund($this->refund($payment, null, 'refund-1', 'refund-key'));
+        $replayed = $this->core->createRefund($this->refund($payment, null, 'refund-2', 'refund-key'));
+
+        Assert::same($replayed->refund->id, $first->refund->id);
+        Assert::same($replayed->operationId->value, 'refund-2');
+        Assert::same($replayed->requestedAmount->minorUnits, 1_200);
+
+        Expect::exception(RefundFailedException::class)->withMessage('Fake payment has no refundable balance left');
+        $this->core->createRefund($this->refund($payment, null, 'refund-3'));
+    }
+
+    /**
+     * Capture is not state-gated, so a payment can be captured again for less
+     * than was already refunded; the balance is then empty, not negative.
+     */
+    public function aRecaptureBelowTheRefundedAmountLeavesNoBalance(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+        $this->core->createRefund($this->refund($payment, new Money(minorUnits: 800, currency: 'EUR'), 'refund-1'));
+        $this->core->capturePayment($this->capture($payment, null, new Money(minorUnits: 100, currency: 'EUR')));
+
+        Expect::exception(RefundFailedException::class)->withMessage('Fake payment has no refundable balance left');
+        $this->core->createRefund($this->refund($payment, new Money(minorUnits: 1, currency: 'EUR'), 'refund-2'));
+    }
+
+    public function refusesACaptureAboveTheAuthorizedAmount(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+
+        Expect::exception(PaymentException::class)->withMessage('Capture amount exceeds the authorized amount of the fake payment');
+        $core->capturePayment($this->capture($payment, null, new Money(minorUnits: 1_201, currency: 'EUR')));
+    }
+
+    public function refusesACaptureInAnotherCurrency(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+
+        Expect::exception(PaymentException::class)->withMessage('Capture currency differs from the fake payment currency');
+        $core->capturePayment($this->capture($payment, null, new Money(minorUnits: 100, currency: 'USD')));
+    }
+
+    public function capturesUpToTheAuthorizedAmount(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+
+        $captured = $core->capturePayment($this->capture($payment, null, new Money(minorUnits: 1_200, currency: 'EUR')));
+
+        Assert::same($captured->amount->minorUnits, 1_200);
+        Assert::same($captured->state, PaymentState::Succeeded);
+    }
+
+    /**
+     * A replay is answered from the saved response; it does not execute the
+     * operation a second time over whatever happened since.
+     */
+    public function replayedOperationsReturnTheSavedResponse(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresAction));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+        $confirmed = $core->confirmPayment($this->operation($payment, 'confirm-key'));
+        $core->cancelPayment($this->operation($payment, 'cancel-key'));
+
+        $replayed = $core->confirmPayment(new PaymentOperationRequest(
+            operationId: new OperationId(value: 'operation-replay'),
+            payment: $payment,
+            idempotencyKey: 'confirm-key',
+        ));
+
+        Assert::same($confirmed->state, PaymentState::Processing);
+        Assert::same($replayed->state, PaymentState::Processing);
+        Assert::same($replayed->operationId->value, 'operation-replay');
+        Assert::same($this->stateOf($core, $payment), PaymentState::Canceled);
+    }
+
+    public function replayedCaptureReturnsTheSavedResponse(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+        $core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 500, currency: 'EUR')));
+        $core->cancelPayment($this->operation($payment, 'cancel-key'));
+
+        $replayed = $core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 500, currency: 'EUR')));
+
+        Assert::same($replayed->state, PaymentState::Succeeded);
+        Assert::same($replayed->amount->minorUnits, 500);
+        Assert::same($this->stateOf($core, $payment), PaymentState::Canceled);
+    }
+
+    public function replayedCancelReturnsTheSavedResponse(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresAction));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+        $core->cancelPayment($this->operation($payment, 'cancel-key'));
+        $core->confirmPayment($this->operation($payment, 'confirm-key'));
+
+        $replayed = $core->cancelPayment($this->operation($payment, 'cancel-key'));
+
+        Assert::same($replayed->state, PaymentState::Canceled);
+        Assert::same($this->stateOf($core, $payment), PaymentState::Processing);
+    }
+
+    public function aRefusedRefundLeavesTheKeyFree(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+
+        try {
+            $this->core->createRefund($this->refund($payment, new Money(minorUnits: 5_000, currency: 'EUR'), 'refund-1', 'refund-key'));
+        } catch (RefundFailedException) {
+        }
+
+        $refund = $this->core->createRefund($this->refund($payment, new Money(minorUnits: 500, currency: 'EUR'), 'refund-2', 'refund-key'));
+
+        Assert::same($refund->requestedAmount->minorUnits, 500);
+    }
+
     public function rejectsRefundReferenceOfAnotherProvider(): void
     {
         Expect::exception(\InvalidArgumentException::class)
@@ -262,6 +463,28 @@ final class FakeGatewayCoreTest
     {
         return new CapturePaymentRequest(
             operationId: new OperationId(value: 'capture-1'),
+            payment: $payment,
+            amount: $amount,
+            idempotencyKey: $key,
+        );
+    }
+
+    private function stateOf(FakeGatewayCore $core, PaymentReference $payment): PaymentState
+    {
+        return $core->retrievePayment(new RetrievePaymentRequest(
+            operationId: new OperationId(value: 'operation-read'),
+            payment: $payment,
+        ))->state;
+    }
+
+    /**
+     * @param non-empty-string $operation
+     * @param non-empty-string|null $key
+     */
+    private function refund(PaymentReference $payment, ?Money $amount, string $operation = 'refund-1', ?string $key = null): CreateRefundRequest
+    {
+        return new CreateRefundRequest(
+            operationId: new OperationId(value: $operation),
             payment: $payment,
             amount: $amount,
             idempotencyKey: $key,

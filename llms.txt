@@ -10,7 +10,13 @@ optional interface is required. Idempotency keys replay only identical request
 fingerprints; a reused key with different data throws. A replayed
 `createPayment()` returns the saved create response (re-stamped with the
 replay's `OperationId`) and never overwrites the stored payment — current state
-comes from `retrievePayment()`. Time is fixed via
+comes from `retrievePayment()`. Replayed capture/confirm/cancel/refund calls
+also return their saved response without re-running; a replayed refund is not
+counted twice. Refunds are refused (`RefundFailedException`) for a payment that
+is not `Succeeded`, in another currency, or above the remaining balance (no
+amount = remaining balance; a second full refund is refused); a capture above
+the created amount or in another currency throws `PaymentException`. Capture,
+confirm and cancel are not state-gated; keys are scoped per operation. Time is fixed via
 `FakeGatewayConfig::$now` — never the wall clock. Assertions throw
 `ContractViolationException` (extends `RuntimeException`) on violations and
 work with any test framework.
