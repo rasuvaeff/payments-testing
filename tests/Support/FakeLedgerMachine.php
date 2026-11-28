@@ -368,6 +368,17 @@ final class FakeLedgerMachine
     }
 
     /**
+     * A refund of one minor unit without a key, the request a balance most
+     * often allows: enough of them reach `maximumRefunds`, and the full-only
+     * gateway refuses each as partial.
+     */
+    #[Rule]
+    public function refundOneUnit(): void
+    {
+        $this->refund(amount: 1, key: null);
+    }
+
+    /**
      * A capture of more than was authorized, the request most often refused.
      */
     #[Rule]

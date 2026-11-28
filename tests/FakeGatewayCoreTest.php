@@ -48,27 +48,32 @@ final class FakeGatewayCoreTest
 {
     /**
      * Minimum share of sequences (in percent) that must take each branch of
-     * the ledger model, set at roughly half of the share measured over
-     * repeated samples (2026-11-28). Keyed capture, confirm and refund
-     * replays land in 4-7% of sequences; at 500 runs a 1% gate expects 20+
-     * hits, so it fails only when a branch is truly lost.
+     * the ledger model, set at roughly half of the lowest share measured over
+     * four 500-run samples (2026-11-28, with saved refusals, the refund
+     * capability axis and one-unit refunds). Keyed capture, confirm and
+     * refund replays and refunds refused at `maximumRefunds` land in 2-4% of
+     * sequences; at 500 runs a 1% gate expects 10+ hits, so it fails only
+     * when a branch is truly lost.
      */
     private const array LEDGER_BRANCHES = [
-        'capture accepted' => 10,
-        'capture refused' => 5,
-        'capture refused by state' => 40,
+        'capture accepted' => 5,
+        'capture refused' => 10,
+        'capture refused by state' => 28,
         'capture replayed' => 1,
-        'confirm accepted' => 8,
-        'confirm refused' => 30,
+        'confirm accepted' => 6,
+        'confirm refused' => 21,
         'confirm replayed' => 1,
-        'cancel accepted' => 20,
-        'cancel refused' => 25,
-        'cancel replayed' => 5,
+        'cancel accepted' => 16,
+        'cancel refused' => 13,
+        'cancel replayed' => 2,
         'refund accepted' => 8,
         'refund refused' => 30,
+        'refund refused as partial' => 3,
+        'refund refused at the maximum' => 1,
         'refund replayed' => 1,
-        'create replayed' => 40,
-        'key conflict' => 40,
+        'refusal replayed' => 20,
+        'create replayed' => 32,
+        'key conflict' => 37,
     ];
 
     private FakeGatewayCore $core;
@@ -1007,7 +1012,7 @@ final class FakeGatewayCoreTest
             'scenario' => Gen::frequency([
                 [4, Gen::constant('authorized')],
                 [2, Gen::constant('confirm and capture')],
-                [1, Gen::constant('paid')],
+                [2, Gen::constant('paid')],
                 [1, Gen::constant('confirm')],
                 [1, Gen::constant('requires action')],
                 [1, Gen::constant('deferred')],
