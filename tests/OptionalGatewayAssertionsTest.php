@@ -17,6 +17,7 @@ use Rasuvaeff\PaymentsTesting\CancelGatewayAssertions;
 use Rasuvaeff\PaymentsTesting\CaptureGatewayAssertions;
 use Rasuvaeff\PaymentsTesting\ConfirmGatewayAssertions;
 use Rasuvaeff\PaymentsTesting\ContractViolationException;
+use Rasuvaeff\PaymentsTesting\Internal\KeyReuseProbe;
 use Rasuvaeff\PaymentsTesting\RefundGatewayAssertions;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -28,6 +29,7 @@ use Testo\Test;
 #[Covers(ConfirmGatewayAssertions::class)]
 #[Covers(CancelGatewayAssertions::class)]
 #[Covers(RefundGatewayAssertions::class)]
+#[Covers(KeyReuseProbe::class)]
 final class OptionalGatewayAssertionsTest
 {
     public function acceptsOptionalPaymentOperations(): void

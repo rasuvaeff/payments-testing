@@ -110,6 +110,7 @@ final class FakeGatewayCore
         );
         $this->payments[$id] = $attempt;
         $this->captureMethods[$id] = $request->captureMethod;
+        $this->refundCounts[$id] = 0;
         $this->save(operation: 'create', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
 
         return $attempt;
@@ -127,7 +128,7 @@ final class FakeGatewayCore
         $amount = $request->amount ?? $stored->amount;
         // The request's own amount: an omitted amount and the full amount
         // named explicitly are different requests to a provider.
-        $fingerprint = $this->fingerprint([$stored->payment->id, $request->amount?->minorUnits, $request->amount?->currency]);
+        $fingerprint = $this->fingerprint([$stored->payment->id, $request->amount]);
         $saved = $this->saved(operation: 'capture', key: $request->idempotencyKey, fingerprint: $fingerprint);
 
         if ($saved instanceof PaymentAttempt) {
@@ -261,7 +262,7 @@ final class FakeGatewayCore
             $attempt = $this->refundAttempt($request->operationId, $reference, $payment->payment, $amount, $this->config->now);
             $this->refunds[$id] = $attempt;
             $this->refunded[$payment->payment->id] = ($this->refunded[$payment->payment->id] ?? 0) + $amount->minorUnits;
-            $this->refundCounts[$payment->payment->id] = ($this->refundCounts[$payment->payment->id] ?? 0) + 1;
+            ++$this->refundCounts[$payment->payment->id];
 
             return $attempt;
         });
@@ -344,7 +345,7 @@ final class FakeGatewayCore
         $partial = $this->config->capabilities->get(PartialRefundCapability::class);
         $maximum = $partial instanceof PartialRefundCapability ? $partial->maximumRefunds : null;
 
-        if ($maximum !== null && ($this->refundCounts[$payment->payment->id] ?? 0) >= $maximum) {
+        if ($maximum !== null && $this->refundCounts[$payment->payment->id] >= $maximum) {
             throw new RefundFailedException(message: \sprintf('Fake payment reached the maximum of %d refunds', $maximum));
         }
 

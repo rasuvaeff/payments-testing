@@ -17,6 +17,7 @@ use Rasuvaeff\Payments\PaymentReference;
 use Rasuvaeff\Payments\RetrievePaymentRequest;
 use Rasuvaeff\PaymentsTesting\ContractViolationException;
 use Rasuvaeff\PaymentsTesting\FakePaymentGateway;
+use Rasuvaeff\PaymentsTesting\Internal\KeyReuseProbe;
 use Rasuvaeff\PaymentsTesting\PaymentGatewayAssertions;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -26,6 +27,7 @@ use Testo\Test;
 #[Test]
 #[Covers(PaymentGatewayAssertions::class)]
 #[Covers(ContractViolationException::class)]
+#[Covers(KeyReuseProbe::class)]
 final class PaymentGatewayAssertionsTest
 {
     public function acceptsValidCreateRetrieveAndIdempotency(): void

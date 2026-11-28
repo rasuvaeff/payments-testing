@@ -391,6 +391,21 @@ final class FakeGatewayCoreTest
     }
 
     /**
+     * `maximumRefunds: 1` allows exactly one refund.
+     */
+    public function allowsOneRefundUnderAMaximumOfOne(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(capabilities: CapabilitySet::of(new PartialRefundCapability(maximumRefunds: 1))));
+        $payment = $core->createPayment(Fixtures::createPayment())->payment;
+        $first = $core->createRefund($this->refund($payment, new Money(minorUnits: 100, currency: 'EUR'), 'refund-1'));
+
+        Assert::same($first->requestedAmount->minorUnits, 100);
+
+        Expect::exception(RefundFailedException::class)->withMessage('Fake payment reached the maximum of 1 refunds');
+        $core->createRefund($this->refund($payment, new Money(minorUnits: 100, currency: 'EUR'), 'refund-2'));
+    }
+
+    /**
      * A replayed refund is not a new one: it does not count against
      * `maximumRefunds`.
      */

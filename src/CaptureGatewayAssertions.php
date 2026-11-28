@@ -50,16 +50,19 @@ final class CaptureGatewayAssertions
             $captured = $attempt->capturedAmount
                 ?? throw new ContractViolationException('Capture response did not report the captured amount');
             AttemptAssertions::same($captured, $requested, 'Capture response reported another captured amount than requested');
-
-            return $attempt;
+        } elseif ($attempt->capturedAmount instanceof Money) {
+            self::assertTakenSoFar(attempt: $attempt, captured: $attempt->capturedAmount, requested: $requested);
         }
 
-        $captured = $attempt->capturedAmount;
+        return $attempt;
+    }
 
-        if (!$captured instanceof Money) {
-            return $attempt;
-        }
-
+    /**
+     * What a capture that has not succeeded may report as taken: nothing for
+     * a failed or pending one, no more than requested otherwise.
+     */
+    private static function assertTakenSoFar(PaymentAttempt $attempt, Money $captured, Money $requested): void
+    {
         if ($captured->currency !== $requested->currency) {
             throw new ContractViolationException('Capture response reported the captured amount in another currency');
         }
@@ -71,8 +74,6 @@ final class CaptureGatewayAssertions
         if ($captured->isGreaterThan($requested)) {
             throw new ContractViolationException('Capture response reported more captured than requested');
         }
-
-        return $attempt;
     }
 
     /**
