@@ -44,6 +44,18 @@ docker run --rm -v "$PWD":/app -w /app composer:2 composer test
   gateway refuses, and a permissive double is the one failure mode a testing
   package cannot afford.
 - Same key plus different fingerprint throws; calls without a key remain distinct.
+  A replay of any keyed operation answers from its saved response and never
+  runs the operation again.
+- **The fake refuses what a provider refuses with money**: refunds of an
+  unpaid payment, in another currency or above the remaining balance, and
+  captures above the created amount or in another currency.
+  `FakeGatewayCoreTest::ledgerAgreesWithAProviderModel` (rule machine in
+  `tests/Support/FakeLedgerMachine.php`) is the model; extend the machine
+  when the fake learns a new rule. Not modelled on purpose: state gating of
+  capture/confirm/cancel (the default `createState` is `Succeeded`) and one
+  key space across operations.
+- A key-reuse probe counts only an answer as a refusal (`Internal\KeyReuseProbe`):
+  transport, 5xx, rate-limit and credential failures propagate.
 - References from another provider and unknown references are rejected.
 - Time is fixed through `FakeGatewayConfig`; tests must not use the wall clock.
 - Capability-specific assertions take intersection types
