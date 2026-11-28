@@ -80,7 +80,7 @@ final class OptionalGatewayAssertionsTest
 
         Expect::exception(ContractViolationException::class)
             ->withMessage('A different idempotency key returned the original refund reference');
-        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, self::keyedRefund());
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, $this->keyedRefund());
     }
 
     public function detectsRefundGatewayAcceptingKeyReuse(): void
@@ -89,7 +89,7 @@ final class OptionalGatewayAssertionsTest
 
         Expect::exception(ContractViolationException::class)
             ->withMessage('Reusing a refund idempotency key with a different request was accepted');
-        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, self::keyedRefund());
+        RefundGatewayAssertions::assertCreateRefundIdempotency($gateway, $this->keyedRefund());
     }
 
     public function refusesRefundIdempotencyAssertionWithoutAKey(): void
@@ -146,7 +146,7 @@ final class OptionalGatewayAssertionsTest
         ]);
     }
 
-    private static function keyedRefund(): CreateRefundRequest
+    private function keyedRefund(): CreateRefundRequest
     {
         return new CreateRefundRequest(
             operationId: new OperationId('refund-1'),

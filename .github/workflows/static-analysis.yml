@@ -78,7 +78,7 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Composer dependencies
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: composer-${{ runner.os }}-${{ hashFiles('**/composer.json') }}
@@ -89,3 +89,10 @@ jobs:
 
       - name: Psalm
         run: composer psalm
+
+      # Part of `composer release-check`, and until now run by nobody but a
+      # human before a tag: rector was red under green builds for five
+      # releases of this family before anyone looked. Same job, so the
+      # required check keeps its name.
+      - name: Rector
+        run: composer rector

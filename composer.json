@@ -27,7 +27,7 @@
     "require-dev": {
         "ergebnis/composer-normalize": "^2.51",
         "friendsofphp/php-cs-fixer": "^3.95",
-        "infection/infection": "^0.33",
+        "infection/infection": "^0.35",
         "maglnet/composer-require-checker": "^4.17",
         "rasuvaeff/rector-named-literals": "^1.0",
         "rector/rector": "^2.4",
@@ -59,7 +59,7 @@
         "sort-packages": true
     },
     "scripts": {
-        "bc-check": "sh -c 'git config --global --add safe.directory /app 2>/dev/null || true; if [ \"$#\" -gt 0 ]; then roave-backward-compatibility-check \"$@\"; exit $?; fi; LATEST=$(git describe --tags --abbrev=0 2>/dev/null || true); if [ -n \"$LATEST\" ]; then roave-backward-compatibility-check --from=\"$LATEST\"; else echo \"No previous tag - skipping BC check\"; fi' --",
+        "bc-check": "sh -c 'git config --global --add safe.directory /app 2>/dev/null || true; if [ \"$#\" -eq 0 ]; then LATEST=$(git describe --tags --abbrev=0 2>/dev/null || true); if [ -z \"$LATEST\" ]; then echo \"No previous tag - skipping BC check\"; exit 0; fi; set -- --from=\"$LATEST\"; fi; CODE=0; OUTPUT=$(roave-backward-compatibility-check \"$@\" 2>&1) || CODE=$?; printf \"%s\\n\" \"$OUTPUT\"; if [ \"$CODE\" -eq 3 ]; then TOTAL=$(printf \"%s\\n\" \"$OUTPUT\" | { grep -cE \"^\\[BC\\] \" || true; }); SKIPPED=$(printf \"%s\\n\" \"$OUTPUT\" | { grep -cE \"^\\[BC\\] SKIPPED:\" || true; }); if [ \"$TOTAL\" -gt 0 ] && [ \"$TOTAL\" -eq \"$SKIPPED\" ]; then echo \"All $TOTAL finding(s) are roave/better-reflection SKIPPED entries (a static-analysis limitation, not a detected break); treating as pass.\"; exit 0; fi; fi; exit \"$CODE\"' --",
         "bench": "testo --suite=Benchmarks -vv",
         "build": [
             "@composer validate --strict",
