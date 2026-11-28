@@ -29,13 +29,13 @@
         "friendsofphp/php-cs-fixer": "^3.95",
         "infection/infection": "^0.35",
         "maglnet/composer-require-checker": "^4.17",
-        "rasuvaeff/property-testing-testo": "^1.0",
-        "rasuvaeff/rector-named-literals": "^1.0",
+        "rasuvaeff/property-testing-testo": "^1.4.1",
+        "rasuvaeff/rector-named-literals": "^1.0.2",
         "rector/rector": "^2.4",
         "roave/backward-compatibility-check": "^8.0",
-        "testo/bridge-infection": "^0.1.6",
-        "testo/testo": "^0.10.25",
-        "vimeo/psalm": "^7.0"
+        "testo/bridge-infection": "^0.1.9",
+        "testo/testo": "^0.10.62",
+        "vimeo/psalm": "^7.23"
     },
     "autoload": {
         "psr-4": {
