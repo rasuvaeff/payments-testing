@@ -92,7 +92,11 @@ endpoint and parameters of its first request:
 - the same key with anything else — another payload, another payment, another
   operation, a create key reused for a refund — throws
   `IdempotencyConflictException`, the exception the core decoder raises for a
-  provider's `idempotency_error`;
+  provider's `idempotency_error`. The payload is every field a provider
+  receives: for a create the amount, currency, payment method (id and kind),
+  customer (id and provider id), capture and confirmation method, description
+  and metadata; for a capture or refund the request's own amount, so an
+  omitted amount and the full amount named explicitly differ;
 - a refused request leaves its key unused; calls without a key are distinct.
   The key is the whole scope: a provider never learns which `OperationId`
   issued the call.

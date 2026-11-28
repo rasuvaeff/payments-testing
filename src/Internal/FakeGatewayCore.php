@@ -70,11 +70,15 @@ final class FakeGatewayCore
 
     public function createPayment(CreatePaymentRequest $request): PaymentAttempt
     {
+        // Every field a provider receives; the OperationId and the key itself
+        // never reach it.
         $fingerprint = $this->fingerprint([
             $request->amount->minorUnits,
             $request->amount->currency,
             $request->paymentMethod?->id,
             $request->paymentMethod?->kind,
+            $request->customer?->id,
+            $request->customer?->providerId,
             $request->captureMethod->value,
             $request->confirmationMethod->value,
             $request->description,
@@ -117,7 +121,9 @@ final class FakeGatewayCore
     {
         $stored = $this->payment($request->payment);
         $amount = $request->amount ?? $stored->amount;
-        $fingerprint = $this->fingerprint([$stored->payment->id, $amount->minorUnits, $amount->currency]);
+        // The request's own amount: an omitted amount and the full amount
+        // named explicitly are different requests to a provider.
+        $fingerprint = $this->fingerprint([$stored->payment->id, $request->amount?->minorUnits, $request->amount?->currency]);
         $saved = $this->saved(operation: 'capture', key: $request->idempotencyKey, fingerprint: $fingerprint);
 
         if ($saved instanceof PaymentAttempt) {

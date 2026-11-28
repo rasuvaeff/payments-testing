@@ -8,8 +8,11 @@ only the base `PaymentGatewayInterface`. Use `FakeCaptureGateway`,
 `FakeConfirmGateway`, `FakeCancelGateway` or `FakeRefundGateway` when that
 optional interface is required. Idempotency keys share one space across
 operations: a key replays only the identical request (same operation, payment,
-payload); anything else throws `IdempotencyConflictException` (a create key
-reused for a refund too). A replayed
+payload — for a create every field: amount, currency, payment method id/kind,
+customer id/providerId, capture/confirmation method, description, metadata;
+for capture/refund the request's own amount, `null` ≠ the full amount);
+anything else throws `IdempotencyConflictException` (a create key reused for a
+refund too). A replayed
 `createPayment()` returns the saved create response (re-stamped with the
 replay's `OperationId`) and never overwrites the stored payment — current state
 comes from `retrievePayment()`. Replayed capture/confirm/cancel/refund calls

@@ -164,7 +164,7 @@ final class FakeLedgerMachine
             idempotencyKey: $key,
         ));
 
-        if ($this->answeredByKey(operation: 'capture', request: $resolved, key: $key, call: $call)) {
+        if ($this->answeredByKey(operation: 'capture', request: $amount, key: $key, call: $call)) {
             return;
         }
 
@@ -184,7 +184,7 @@ final class FakeLedgerMachine
         $this->state = PaymentState::Succeeded;
         $this->captured = $resolved;
         Assert::same($captured->amount->minorUnits, self::AUTHORIZED);
-        $this->accepted(operation: 'capture', request: $resolved, key: $key, attempt: $captured);
+        $this->accepted(operation: 'capture', request: $amount, key: $key, attempt: $captured);
     }
 
     #[Rule]

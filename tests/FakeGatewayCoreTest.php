@@ -9,6 +9,7 @@ use Rasuvaeff\Payments\CapturePaymentRequest;
 use Rasuvaeff\Payments\ConfirmationMethod;
 use Rasuvaeff\Payments\CreatePaymentRequest;
 use Rasuvaeff\Payments\CreateRefundRequest;
+use Rasuvaeff\Payments\CustomerReference;
 use Rasuvaeff\Payments\IdempotencyConflictException;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\OperationId;
@@ -242,6 +243,65 @@ final class FakeGatewayCoreTest
         yield 'capture then refund' => ['capture', 'refund'];
         yield 'cancel then confirm' => ['cancel', 'confirm'];
         yield 'cancel then create' => ['cancel', 'create'];
+    }
+
+    /**
+     * A provider compares every parameter of the first request with the
+     * replay's ("compares incoming parameters to those of the original
+     * request and errors if they're not the same",
+     * https://docs.stripe.com/api/idempotent_requests). Each case changes one
+     * field of the create and nothing else.
+     *
+     * @param array<string, mixed> $changed
+     */
+    #[DataProvider('createFieldProvider')]
+    public function refusesTheCreateKeyWithAnyFieldChanged(array $changed): void
+    {
+        $this->core->createPayment($this->createWith([]));
+
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
+        $this->core->createPayment($this->createWith($changed));
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>}>
+     */
+    public static function createFieldProvider(): iterable
+    {
+        yield 'amount' => [['amount' => new Money(minorUnits: 1_201, currency: 'EUR')]];
+        yield 'currency' => [['amount' => new Money(minorUnits: 1_200, currency: 'USD')]];
+        yield 'payment method' => [['paymentMethod' => new PaymentMethodReference(id: 'pm_2', kind: 'card')]];
+        yield 'payment method kind' => [['paymentMethod' => new PaymentMethodReference(id: 'pm_1', kind: 'sepa_debit')]];
+        yield 'no payment method' => [['paymentMethod' => null]];
+        yield 'customer' => [['customer' => new CustomerReference(id: 'cus_B', providerId: 'cus_provider')]];
+        yield 'provider customer' => [['customer' => new CustomerReference(id: 'cus_A', providerId: 'cus_other')]];
+        yield 'no customer' => [['customer' => null]];
+        yield 'capture method' => [['captureMethod' => CaptureMethod::Manual]];
+        yield 'confirmation method' => [['confirmationMethod' => ConfirmationMethod::Manual]];
+        yield 'description' => [['description' => 'Order 2']];
+        yield 'metadata' => [['metadata' => ['order' => '2']]];
+    }
+
+    public function replaysTheCreateKeyWithEveryFieldTheSame(): void
+    {
+        $first = $this->core->createPayment($this->createWith([]));
+        $replayed = $this->core->createPayment($this->createWith(['operationId' => new OperationId(value: 'operation-2')]));
+
+        Assert::same($replayed->payment, $first->payment);
+    }
+
+    /**
+     * Omitting the capture amount and naming the full amount are two
+     * different requests to a provider (`amount_to_capture` absent or set),
+     * as they are for a refund.
+     */
+    public function refusesTheCaptureKeyWithAnExplicitFullAmount(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
+        $this->core->capturePayment($this->capture($payment, 'capture-key'));
+
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
+        $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 1_200, currency: 'EUR')));
     }
 
     public function refusesTheCreateKeyForARefund(): void
@@ -785,6 +845,26 @@ final class FakeGatewayCoreTest
         } finally {
             restore_error_handler();
         }
+    }
+
+    /**
+     * @param array<string, mixed> $changed
+     */
+    private function createWith(array $changed): CreatePaymentRequest
+    {
+        $fields = [
+            'operationId' => new OperationId(value: 'operation-1'),
+            'amount' => new Money(minorUnits: 1_200, currency: 'EUR'),
+            'paymentMethod' => new PaymentMethodReference(id: 'pm_1', kind: 'card'),
+            'customer' => new CustomerReference(id: 'cus_A', providerId: 'cus_provider'),
+            'captureMethod' => CaptureMethod::Automatic,
+            'confirmationMethod' => ConfirmationMethod::Automatic,
+            'description' => 'Order 1',
+            'metadata' => ['order' => '1'],
+            'idempotencyKey' => 'create-key',
+        ];
+
+        return new CreatePaymentRequest(...array_replace($fields, $changed));
     }
 
     private function capture(PaymentReference $payment, ?string $key, ?Money $amount = null): CapturePaymentRequest
