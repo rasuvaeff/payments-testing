@@ -9,6 +9,7 @@ use Rasuvaeff\Payments\CapturePaymentRequest;
 use Rasuvaeff\Payments\Money;
 use Rasuvaeff\Payments\PaymentAttempt;
 use Rasuvaeff\Payments\PaymentGatewayInterface;
+use Rasuvaeff\Payments\PaymentState;
 use Rasuvaeff\PaymentsTesting\Internal\AttemptAssertions;
 use Rasuvaeff\PaymentsTesting\Internal\KeyReuseProbe;
 
@@ -22,11 +23,15 @@ final class CaptureGatewayAssertions
      * may answer a capture with a reference of its own (PayPal returns the
      * capture, not the order).
      *
-     * A capture response must report `capturedAmount`: the requested amount,
-     * or the payment's `amount` for a capture without one. `amount` itself
-     * stays the authorized amount and is not compared — after a partial
-     * capture it is larger than what was taken. Run it against a payment
-     * with no earlier capture.
+     * `capturedAmount` is the gross amount taken, so what a capture must
+     * report depends on how it ended. A `Succeeded` capture reports exactly
+     * the requested amount, or the payment's `amount` for a capture without
+     * one. A `Failed` or `Pending` capture has taken nothing yet: zero, or
+     * `null` when the response does not say. Any other outcome
+     * (`Processing`) reports `null` or no more than was requested. `amount`
+     * itself stays the authorized amount and is not compared — after a
+     * partial capture it is larger than what was taken. Run it against a
+     * payment with no earlier capture.
      */
     public static function assertCapturePayment(
         PaymentGatewayInterface&CaptureGatewayInterface $gateway,
@@ -39,9 +44,33 @@ final class CaptureGatewayAssertions
             operationId: $request->operationId,
         );
 
-        $captured = $attempt->capturedAmount
-            ?? throw new ContractViolationException('Capture response did not report the captured amount');
-        AttemptAssertions::same($captured, $request->amount ?? $attempt->amount, 'Capture response reported another captured amount than requested');
+        $requested = $request->amount ?? $attempt->amount;
+
+        if ($attempt->state === PaymentState::Succeeded) {
+            $captured = $attempt->capturedAmount
+                ?? throw new ContractViolationException('Capture response did not report the captured amount');
+            AttemptAssertions::same($captured, $requested, 'Capture response reported another captured amount than requested');
+
+            return $attempt;
+        }
+
+        $captured = $attempt->capturedAmount;
+
+        if (!$captured instanceof Money) {
+            return $attempt;
+        }
+
+        if ($captured->currency !== $requested->currency) {
+            throw new ContractViolationException('Capture response reported the captured amount in another currency');
+        }
+
+        if (\in_array($attempt->state, [PaymentState::Failed, PaymentState::Pending], strict: true) && !$captured->isZero()) {
+            throw new ContractViolationException(\sprintf('A %s capture reported money as captured', $attempt->state->value));
+        }
+
+        if ($captured->isGreaterThan($requested)) {
+            throw new ContractViolationException('Capture response reported more captured than requested');
+        }
 
         return $attempt;
     }
@@ -71,8 +100,8 @@ final class CaptureGatewayAssertions
         $second = self::assertCapturePayment($gateway, $request);
         AttemptAssertions::same($second->payment, $first->payment, 'Capture idempotency key produced another payment reference');
         AttemptAssertions::same($second->amount, $first->amount, 'A replayed capture reported another amount');
-        // assertCapturePayment() proved both calls reported exactly this as
-        // captured.
+        // The probe changes what was asked for; what was taken depends on how
+        // the capture ended and is checked by assertCapturePayment().
         $captured = $request->amount ?? $first->amount;
 
         if ($second->state !== $first->state) {

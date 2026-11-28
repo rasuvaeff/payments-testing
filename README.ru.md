@@ -193,7 +193,7 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 | `PaymentGatewayAssertions` | `assertCreatePayment()` | Консистентность провайдера, сохранение operation id и amount |
 | `PaymentGatewayAssertions` | `assertCreatePaymentIdempotency()` | Повтор ключа возвращает тот же платёж, **другой** ключ начинает новый, а переиспользование ключа с изменённым запросом отвергается |
 | `PaymentGatewayAssertions` | `assertRetrievePayment()` | Консистентность провайдера, сохранение operation id и payment reference |
-| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture сохраняет operation id, провайдер консистентен, а `capturedAmount` равен запрошенной сумме (`amount` платежа, если суммы нет); `amount` остаётся авторизацией и не сравнивается, как и payment reference (PayPal отвечает reference самого capture) |
+| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture сохраняет operation id, провайдер консистентен; `capturedAmount` (брутто, сколько взято) — по исходу: capture в `Succeeded` сообщает ровно запрошенную сумму (`amount` платежа, если суммы нет), в `Failed` или `Pending` — ноль или `null`, в любом другом (`Processing`) — `null` или не больше запрошенного, всегда в валюте запроса; `amount` остаётся авторизацией и не сравнивается, как и payment reference (PayPal отвечает reference самого capture) |
 | `CaptureGatewayAssertions` | `assertCapturePaymentIdempotency()` | Повтор ключа возвращает ту же reference, сумму, захваченную сумму и состояние, а переиспользование ключа с изменённой суммой (на единицу от захваченной) отвергается |
 | `ConfirmGatewayAssertions` | `assertConfirmPayment()` | Confirm сохраняет operation id и payment reference |
 | `ConfirmGatewayAssertions` | `assertConfirmPaymentIdempotency()` | Повтор ключа возвращает то же состояние |
@@ -223,8 +223,9 @@ assertion не пройден, а не засчитан; `\Error` вроде `Ty
 без частичного capture), эту половину всё равно проходит.
 
 Не проверяется: состояние, которое сообщает операция (capture законно может
-вернуть `Processing`, `Pending` или `Failed`), и ключ confirm или cancel,
-переиспользованный для другого платежа.
+вернуть `Processing`, `Pending` или `Failed`; с этим состоянием сверяется только
+захваченная сумма), и ключ confirm или cancel, переиспользованный для другого
+платежа.
 
 ## Безопасность
 

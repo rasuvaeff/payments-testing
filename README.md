@@ -189,7 +189,7 @@ PaymentGatewayAssertions::assertRetrievePayment($gateway, new RetrievePaymentReq
 | `PaymentGatewayAssertions` | `assertCreatePayment()` | Provider consistency, operation id and amount preserved |
 | `PaymentGatewayAssertions` | `assertCreatePaymentIdempotency()` | Replaying a key returns the same payment, a **different** key starts a new one, and reusing a key with a changed request is refused |
 | `PaymentGatewayAssertions` | `assertRetrievePayment()` | Provider consistency, operation id and payment reference preserved |
-| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture preserves operation id, provider consistent, and reports `capturedAmount` equal to the requested amount (the payment's `amount` without one); `amount` stays the authorization and is not compared, nor is the payment reference (PayPal answers with the capture's) |
+| `CaptureGatewayAssertions` | `assertCapturePayment()` | Capture preserves operation id, provider consistent; `capturedAmount` (gross, what was taken) by outcome: a `Succeeded` capture reports exactly the requested amount (the payment's `amount` without one), a `Failed` or `Pending` one zero or `null`, any other (`Processing`) `null` or no more than requested, always in the request's currency; `amount` stays the authorization and is not compared, nor is the payment reference (PayPal answers with the capture's) |
 | `CaptureGatewayAssertions` | `assertCapturePaymentIdempotency()` | Replaying a key returns the same reference, amount, captured amount and state, and reusing the key with a changed amount (one unit off the captured amount) is refused |
 | `ConfirmGatewayAssertions` | `assertConfirmPayment()` | Confirm preserves operation id and payment reference |
 | `ConfirmGatewayAssertions` | `assertConfirmPaymentIdempotency()` | Replaying a key returns the same state |
@@ -219,8 +219,8 @@ the assertion is inconclusive rather than passed; an `\Error` such as a
 own grounds (an adapter without partial capture) still passes that half.
 
 Not checked: the state an operation reports (a capture may legitimately come
-back `Processing`, `Pending` or `Failed`), and a confirm or cancel key reused
-for another payment.
+back `Processing`, `Pending` or `Failed`; only the captured amount is held to
+that state), and a confirm or cancel key reused for another payment.
 
 ## Security
 

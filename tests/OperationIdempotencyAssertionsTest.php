@@ -148,6 +148,18 @@ final class OperationIdempotencyAssertionsTest
         yield 'not reported' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 40, reportsCaptured: false), 'Capture response did not report the captured amount'];
         yield 'the authorization reported as captured' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100), 'Capture response reported another captured amount than requested'];
         yield 'less captured than a full capture' => [null, ScriptedOperationGateway::attempt($operation, 'pay_1', 100, captured: new Money(99, 'EUR')), 'Capture response reported another captured amount than requested'];
+        // A capture may legitimately end Failed, Pending or Processing; only
+        // a succeeded one must report the whole request as captured.
+        yield 'failed capture took nothing' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Failed, new Money(0, 'EUR')), null];
+        yield 'failed capture does not say' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Failed, reportsCaptured: false), null];
+        yield 'failed capture reported as taken' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Failed, new Money(40, 'EUR')), 'A failed capture reported money as captured'];
+        yield 'pending capture took nothing yet' => [null, ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Pending, new Money(0, 'EUR')), null];
+        yield 'pending capture reported as taken' => [null, ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Pending, new Money(1, 'EUR')), 'A pending capture reported money as captured'];
+        yield 'processing capture took part' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Processing, new Money(40, 'EUR')), null];
+        yield 'processing capture does not say' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Processing, reportsCaptured: false), null];
+        yield 'processing capture above the request' => [new Money(40, 'EUR'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Processing, new Money(41, 'EUR')), 'Capture response reported more captured than requested'];
+        yield 'processing capture in another currency' => [new Money(40, 'USD'), ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Processing, new Money(0, 'EUR')), 'Capture response reported the captured amount in another currency'];
+        yield 'processing capture of the whole amount' => [null, ScriptedOperationGateway::attempt($operation, 'pay_1', 100, PaymentState::Processing, new Money(100, 'EUR')), null];
     }
 
     public function captureIdempotencyNeedsTheCapturedAmountReported(): void

@@ -86,7 +86,7 @@ PaymentGatewayAssertions::assertCreatePayment(PaymentGatewayInterface $g, Create
 PaymentGatewayAssertions::assertCreatePaymentIdempotency(PaymentGatewayInterface $g, CreatePaymentRequest $r): PaymentAttempt; // replays the request's (possibly generated) key
 PaymentGatewayAssertions::assertRetrievePayment(PaymentGatewayInterface $g, RetrievePaymentRequest $r): PaymentAttempt;
 
-CaptureGatewayAssertions::assertCapturePayment(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt; // capturedAmount must equal request amount (or attempt amount); reference and amount not compared
+CaptureGatewayAssertions::assertCapturePayment(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt; // capturedAmount by outcome: Succeeded → exactly the request amount (or attempt amount); Failed/Pending → 0 or null; other → null or ≤ requested; same currency; reference and amount not compared
 CaptureGatewayAssertions::assertCapturePaymentIdempotency(PaymentGatewayInterface&CaptureGatewayInterface $g, CapturePaymentRequest $r): PaymentAttempt; // needs idempotencyKey
 ConfirmGatewayAssertions::assertConfirmPayment(PaymentGatewayInterface&ConfirmGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt;
 ConfirmGatewayAssertions::assertConfirmPaymentIdempotency(PaymentGatewayInterface&ConfirmGatewayInterface $g, PaymentOperationRequest $r): PaymentAttempt; // needs idempotencyKey
