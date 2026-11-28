@@ -907,6 +907,65 @@ final class FakeGatewayCoreTest
         Assert::same($moved->capturedAmount?->minorUnits, 0);
     }
 
+    /**
+     * A manual-capture payment that the customer completes waits for its
+     * capture: the provider moves it to `RequiresCapture`, never straight to
+     * `Succeeded`. Simulating `Succeeded` from there would capture money no
+     * one captured.
+     */
+    #[DataProvider('uncapturedManualStateProvider')]
+    public function refusesSucceededForAManualCaptureNobodyCaptured(PaymentState $state): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: $state));
+        $payment = $core->createPayment(Fixtures::authorizePayment())->payment;
+
+        Expect::exception(\InvalidArgumentException::class)->withMessage('A manual-capture fake payment in state ' . $state->value . ' moves to requires_capture, not succeeded: capture it');
+        $core->transition(payment: $payment, state: PaymentState::Succeeded, operationId: new OperationId(value: 'webhook-1'));
+    }
+
+    /** @return iterable<string, array{PaymentState}> */
+    public static function uncapturedManualStateProvider(): iterable
+    {
+        yield 'pending' => [PaymentState::Pending];
+        yield 'requires payment method' => [PaymentState::RequiresPaymentMethod];
+        yield 'requires action' => [PaymentState::RequiresAction];
+    }
+
+    /**
+     * From `RequiresCapture` (a capture in the provider's dashboard) or
+     * `Processing` the simulated success captures the whole amount; a
+     * manual-capture payment completed by the customer reaches
+     * `RequiresCapture` first.
+     */
+    #[DataProvider('capturableManualStateProvider')]
+    public function settlesAManualCaptureFromACapturableState(PaymentState $state): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: $state));
+        $payment = $core->createPayment(Fixtures::authorizePayment())->payment;
+
+        $moved = $core->transition(payment: $payment, state: PaymentState::Succeeded, operationId: new OperationId(value: 'webhook-1'));
+
+        Assert::same($moved->capturedAmount?->minorUnits, 1_200);
+    }
+
+    /** @return iterable<string, array{PaymentState}> */
+    public static function capturableManualStateProvider(): iterable
+    {
+        yield 'requires capture' => [PaymentState::RequiresCapture];
+        yield 'processing' => [PaymentState::Processing];
+    }
+
+    public function completesAManualCaptureToRequiresCapture(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresAction));
+        $payment = $core->createPayment(Fixtures::authorizePayment())->payment;
+
+        $moved = $core->transition(payment: $payment, state: PaymentState::RequiresCapture, operationId: new OperationId(value: 'webhook-1'));
+
+        Assert::same($moved->state, PaymentState::RequiresCapture);
+        Assert::same($moved->capturedAmount?->minorUnits, 0);
+    }
+
     public function refusesASimulatedTransitionTheStateMapForbids(): void
     {
         $payment = $this->core->createPayment(Fixtures::createPayment())->payment;

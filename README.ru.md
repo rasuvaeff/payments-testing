@@ -88,7 +88,11 @@ $gateway->simulateTransition($attempt->payment, PaymentState::Succeeded); // п�
 
 Он принимает только переход, который разрешает `PaymentState::canTransitionTo()`
 (иначе `InvalidArgumentException`); переход в `Succeeded` без захваченной суммы
-захватывает всю сумму.
+захватывает всю сумму. Платёж с ручным capture делает это только из
+`RequiresCapture` (capture в дашборде провайдера) или `Processing`: завершённый
+покупателем, он ждёт своего capture, поэтому из `Pending`,
+`RequiresPaymentMethod` или `RequiresAction` симулируйте `RequiresCapture` и
+захватите его — `Succeeded` бросает `InvalidArgumentException`.
 
 **У ключей идемпотентности одно пространство**, как у Stripe, где ключ привязан
 к эндпоинту и параметрам первого запроса:

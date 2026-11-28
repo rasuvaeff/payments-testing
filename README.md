@@ -85,7 +85,11 @@ $gateway->simulateTransition($attempt->payment, PaymentState::Succeeded); // the
 
 It accepts only a move `PaymentState::canTransitionTo()` allows
 (`InvalidArgumentException` otherwise); reaching `Succeeded` with nothing
-captured captures the whole amount.
+captured captures the whole amount. A manual-capture payment does that only
+from `RequiresCapture` (a capture in the provider's dashboard) or `Processing`:
+completed by the customer it waits for its capture, so from `Pending`,
+`RequiresPaymentMethod` or `RequiresAction` simulate `RequiresCapture` and
+capture it — `Succeeded` throws `InvalidArgumentException`.
 
 **Idempotency keys share one space**, as at Stripe, where a key is bound to the
 endpoint and parameters of its first request:

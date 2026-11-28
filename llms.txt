@@ -36,7 +36,10 @@ before the key is looked at (validation; the key stays free). `simulateTransitio
 ?OperationId)` on every fake moves a payment as the provider would without an
 API call (3DS done, deferred payment paid); only `canTransitionTo()` moves,
 else `InvalidArgumentException`; `Succeeded` with nothing captured captures
-the whole amount. Time is fixed via
+the whole amount — for a manual-capture payment only from
+`RequiresCapture`/`Processing` (from `Pending`/`RequiresPaymentMethod`/
+`RequiresAction` → `InvalidArgumentException`; simulate `RequiresCapture`,
+then capture). Time is fixed via
 `FakeGatewayConfig::$now` — never the wall clock. Assertions throw
 `ContractViolationException` (extends `RuntimeException`) on violations and
 work with any test framework.

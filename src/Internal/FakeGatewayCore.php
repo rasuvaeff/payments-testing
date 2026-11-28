@@ -200,7 +200,10 @@ final class FakeGatewayCore
      * the customer completes 3-D Secure or pays a deferred payment, a bank
      * transfer settles, an authorization expires. Only a move the advisory
      * state map allows is accepted; reaching `Succeeded` without a capture
-     * captures the whole amount.
+     * captures the whole amount. A manual-capture payment the customer
+     * completes waits for its capture, so `Succeeded` with nothing captured
+     * is accepted for it only from `RequiresCapture` (a capture in the
+     * provider's dashboard) or `Processing`.
      */
     public function transition(PaymentReference $payment, PaymentState $state, OperationId $operationId): PaymentAttempt
     {
@@ -211,6 +214,18 @@ final class FakeGatewayCore
         }
 
         $captured = $stored->capturedAmount ?? $this->nothing($stored->amount);
+
+        if (
+            $state === PaymentState::Succeeded
+            && $captured->isZero()
+            && $this->captureMethods[$stored->payment->id] === CaptureMethod::Manual
+            && !\in_array($stored->state, [PaymentState::RequiresCapture, PaymentState::Processing], strict: true)
+        ) {
+            throw new \InvalidArgumentException(\sprintf(
+                'A manual-capture fake payment in state %s moves to requires_capture, not succeeded: capture it',
+                $stored->state->value,
+            ));
+        }
 
         return $this->move(
             stored: $stored,

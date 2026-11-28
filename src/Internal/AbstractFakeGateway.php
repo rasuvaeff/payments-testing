@@ -65,7 +65,10 @@ abstract class AbstractFakeGateway implements PaymentGatewayInterface
      * reach the state a webhook would report. Only a move
      * `PaymentState::canTransitionTo()` allows is accepted
      * (`\InvalidArgumentException` otherwise); reaching `Succeeded` with
-     * nothing captured captures the whole amount.
+     * nothing captured captures the whole amount. A manual-capture payment
+     * reaches `Succeeded` that way only from `RequiresCapture` or
+     * `Processing`; from an earlier state the customer's completion moves it
+     * to `RequiresCapture`, so simulate that and capture it.
      */
     final public function simulateTransition(
         PaymentReference $payment,
