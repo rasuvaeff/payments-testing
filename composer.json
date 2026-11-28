@@ -22,7 +22,7 @@
     },
     "require": {
         "php": "8.3 - 8.6",
-        "rasuvaeff/payments": "^0.1 || ^0.2"
+        "rasuvaeff/payments": "^0.3"
     },
     "require-dev": {
         "ergebnis/composer-normalize": "^2.51",
@@ -58,6 +58,11 @@
             "ext-intl": "1.0.0"
         },
         "sort-packages": true
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "0.2.x-dev"
+        }
     },
     "scripts": {
         "bc-check": "sh -c 'git config --global --add safe.directory /app 2>/dev/null || true; if [ \"$#\" -eq 0 ]; then LATEST=$(git describe --tags --abbrev=0 2>/dev/null || true); if [ -z \"$LATEST\" ]; then echo \"No previous tag - skipping BC check\"; exit 0; fi; set -- --from=\"$LATEST\"; fi; CODE=0; OUTPUT=$(roave-backward-compatibility-check \"$@\" 2>&1) || CODE=$?; printf \"%s\\n\" \"$OUTPUT\"; if [ \"$CODE\" -eq 3 ]; then TOTAL=$(printf \"%s\\n\" \"$OUTPUT\" | { grep -cE \"^\\[BC\\] \" || true; }); SKIPPED=$(printf \"%s\\n\" \"$OUTPUT\" | { grep -cE \"^\\[BC\\] SKIPPED:\" || true; }); if [ \"$TOTAL\" -gt 0 ] && [ \"$TOTAL\" -eq \"$SKIPPED\" ]; then echo \"All $TOTAL finding(s) are roave/better-reflection SKIPPED entries (a static-analysis limitation, not a detected break); treating as pass.\"; exit 0; fi; fi; exit \"$CODE\"' --",
