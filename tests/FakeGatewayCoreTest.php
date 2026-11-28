@@ -594,18 +594,58 @@ final class FakeGatewayCoreTest
         $this->core->cancelPayment($this->operation($payment, 'cancel-key-2'));
     }
 
-    public function aRefusedRefundLeavesTheKeyFree(): void
+    /**
+     * Stripe "saves the status code and body of the first request made with
+     * a given idempotency key" once the endpoint has begun executing, errors
+     * included: "Retries with the same key return the saved response"
+     * (https://docs.stripe.com/api/idempotent_requests). A refusal for the
+     * payment's balance comes from the executing endpoint, so the key is
+     * spent: the same request gets the same refusal, a corrected one a
+     * conflict.
+     */
+    public function aRefusedRefundSpendsTheKey(): void
     {
         $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+        $refused = $this->refusal(fn() => $this->core->createRefund($this->refund($payment, new Money(minorUnits: 5_000, currency: 'EUR'), 'refund-1', 'refund-key')));
 
+        Assert::same($refused::class, RefundFailedException::class);
+        Assert::same(
+            $this->refusal(fn() => $this->core->createRefund($this->refund($payment, new Money(minorUnits: 5_000, currency: 'EUR'), 'refund-2', 'refund-key'))),
+            $refused,
+        );
+
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
+        $this->core->createRefund($this->refund($payment, new Money(minorUnits: 500, currency: 'EUR'), 'refund-3', 'refund-key'));
+    }
+
+    /**
+     * The saved refusal is replayed before the state gate, as a saved
+     * success is: the payment has since become capturable, and the same
+     * request with the same key still gets the first answer.
+     */
+    public function aSavedRefusalOutlivesAStateChange(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::pendingPayment())->payment;
+        $refused = $this->refusal(fn() => $this->core->capturePayment($this->capture($payment, 'capture-key')));
+        $this->core->confirmPayment($this->operation($payment, 'confirm-key'));
+
+        Assert::same($refused->getMessage(), 'Fake payment in state pending cannot be captured');
+        Assert::same($this->refusal(fn() => $this->core->capturePayment($this->capture($payment, 'capture-key'))), $refused);
+        Assert::same($this->stateOf($this->core, $payment), PaymentState::Succeeded);
+    }
+
+    /**
+     * @param \Closure(): mixed $call
+     */
+    private function refusal(\Closure $call): PaymentException
+    {
         try {
-            $this->core->createRefund($this->refund($payment, new Money(minorUnits: 5_000, currency: 'EUR'), 'refund-1', 'refund-key'));
-        } catch (RefundFailedException) {
+            $call();
+        } catch (PaymentException $refused) {
+            return $refused;
         }
 
-        $refund = $this->core->createRefund($this->refund($payment, new Money(minorUnits: 500, currency: 'EUR'), 'refund-2', 'refund-key'));
-
-        Assert::same($refund->requestedAmount->minorUnits, 500);
+        Assert::fail('Expected a refusal');
     }
 
     /**
@@ -679,20 +719,33 @@ final class FakeGatewayCoreTest
     }
 
     /**
-     * A refused capture leaves its key free: nothing was saved for it.
+     * A refused capture spends its key like a refused refund.
      */
-    public function aRefusedCaptureLeavesTheKeyFree(): void
+    public function aRefusedCaptureSpendsTheKey(): void
     {
         $payment = $this->core->createPayment(Fixtures::authorizePayment())->payment;
+        $refused = $this->refusal(fn() => $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 5_000, currency: 'EUR'))));
 
-        try {
-            $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 5_000, currency: 'EUR')));
-        } catch (PaymentException) {
-        }
+        Assert::same($refused->getMessage(), 'Capture amount exceeds the authorized amount of the fake payment');
+        Assert::same($this->refusal(fn() => $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 5_000, currency: 'EUR')))), $refused);
 
-        $captured = $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 500, currency: 'EUR')));
+        Expect::exception(IdempotencyConflictException::class)->withMessage('Idempotency key was reused with a different fake request');
+        $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 500, currency: 'EUR')));
+    }
 
-        Assert::same($captured->capturedAmount?->minorUnits, 500);
+    /**
+     * Confirm and cancel refusals are saved the same way.
+     */
+    public function aRefusedConfirmOrCancelSpendsTheKey(): void
+    {
+        $payment = $this->core->createPayment(Fixtures::createPayment())->payment;
+        $confirm = $this->refusal(fn() => $this->core->confirmPayment($this->operation($payment, 'op-key')));
+
+        Assert::same($this->refusal(fn() => $this->core->confirmPayment($this->operation($payment, 'op-key'))), $confirm);
+
+        $cancel = $this->refusal(fn() => $this->core->cancelPayment($this->operation($payment, 'cancel-key')));
+        Assert::same($this->refusal(fn() => $this->core->cancelPayment($this->operation($payment, 'cancel-key'))), $cancel);
+        Assert::same($this->refusal(fn() => $this->core->confirmPayment($this->operation($payment, 'cancel-key')))::class, IdempotencyConflictException::class);
     }
 
     #[DataProvider('cancelProvider')]

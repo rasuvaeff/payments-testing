@@ -40,10 +40,10 @@ use Rasuvaeff\PaymentsTesting\FakeGatewayConfig;
  * | refund | `Succeeded`, a positive amount up to `capturedAmount` minus earlier refunds | refund `Succeeded` |
  *
  * Idempotency keys share one space across operations: a key is answered
- * from its first response when the request is the same, and refused with
- * `IdempotencyConflictException` when anything differs — another payload,
- * another payment or another operation. A replay is checked before the
- * state gate, as a provider does.
+ * from its first response — a refusal included — when the request is the
+ * same, and refused with `IdempotencyConflictException` when anything
+ * differs — another payload, another payment or another operation. A replay
+ * is checked before the state gate, as a provider does.
  *
  * @internal
  *
@@ -131,20 +131,19 @@ final class FakeGatewayCore
             return $this->restamp(attempt: $saved, operationId: $request->operationId);
         }
 
-        $this->assertState(payment: $stored, allowed: [PaymentState::RequiresCapture], operation: 'captured');
+        return $this->executed(operation: 'capture', key: $request->idempotencyKey, fingerprint: $fingerprint, run: function () use ($stored, $amount, $request): PaymentAttempt {
+            $this->assertState(payment: $stored, allowed: [PaymentState::RequiresCapture], operation: 'captured');
 
-        if ($amount->currency !== $stored->amount->currency) {
-            throw new PaymentException(message: 'Capture currency differs from the fake payment currency');
-        }
+            if ($amount->currency !== $stored->amount->currency) {
+                throw new PaymentException(message: 'Capture currency differs from the fake payment currency');
+            }
 
-        if ($amount->isGreaterThan($stored->amount)) {
-            throw new PaymentException(message: 'Capture amount exceeds the authorized amount of the fake payment');
-        }
+            if ($amount->isGreaterThan($stored->amount)) {
+                throw new PaymentException(message: 'Capture amount exceeds the authorized amount of the fake payment');
+            }
 
-        $attempt = $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::Succeeded, capturedAmount: $amount);
-        $this->save(operation: 'capture', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
-
-        return $attempt;
+            return $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::Succeeded, capturedAmount: $amount);
+        });
     }
 
     public function confirmPayment(PaymentOperationRequest $request): PaymentAttempt
@@ -157,13 +156,13 @@ final class FakeGatewayCore
             return $this->restamp(attempt: $saved, operationId: $request->operationId);
         }
 
-        $this->assertState(payment: $stored, allowed: [PaymentState::Pending, PaymentState::RequiresAction], operation: 'confirmed');
-        $attempt = $this->captureMethods[$stored->payment->id] === CaptureMethod::Manual
-            ? $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::RequiresCapture, capturedAmount: $this->nothing($stored->amount))
-            : $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::Succeeded, capturedAmount: $stored->amount);
-        $this->save(operation: 'confirm', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
+        return $this->executed(operation: 'confirm', key: $request->idempotencyKey, fingerprint: $fingerprint, run: function () use ($stored, $request): PaymentAttempt {
+            $this->assertState(payment: $stored, allowed: [PaymentState::Pending, PaymentState::RequiresAction], operation: 'confirmed');
 
-        return $attempt;
+            return $this->captureMethods[$stored->payment->id] === CaptureMethod::Manual
+                ? $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::RequiresCapture, capturedAmount: $this->nothing($stored->amount))
+                : $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::Succeeded, capturedAmount: $stored->amount);
+        });
     }
 
     public function cancelPayment(PaymentOperationRequest $request): PaymentAttempt
@@ -176,21 +175,21 @@ final class FakeGatewayCore
             return $this->restamp(attempt: $saved, operationId: $request->operationId);
         }
 
-        $this->assertState(
-            payment: $stored,
-            allowed: [
-                PaymentState::Pending,
-                PaymentState::RequiresPaymentMethod,
-                PaymentState::RequiresAction,
-                PaymentState::RequiresCapture,
-                PaymentState::Processing,
-            ],
-            operation: 'canceled',
-        );
-        $attempt = $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::Canceled, capturedAmount: $stored->capturedAmount);
-        $this->save(operation: 'cancel', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
+        return $this->executed(operation: 'cancel', key: $request->idempotencyKey, fingerprint: $fingerprint, run: function () use ($stored, $request): PaymentAttempt {
+            $this->assertState(
+                payment: $stored,
+                allowed: [
+                    PaymentState::Pending,
+                    PaymentState::RequiresPaymentMethod,
+                    PaymentState::RequiresAction,
+                    PaymentState::RequiresCapture,
+                    PaymentState::Processing,
+                ],
+                operation: 'canceled',
+            );
 
-        return $attempt;
+            return $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::Canceled, capturedAmount: $stored->capturedAmount);
+        });
     }
 
     /**
@@ -237,15 +236,16 @@ final class FakeGatewayCore
             return $this->restampRefund(attempt: $saved, operationId: $request->operationId);
         }
 
-        $amount = $this->refundableAmount(payment: $payment, requested: $request->amount);
-        $id = $this->newReference(prefix: 'ref', operationId: $request->operationId, index: $index);
-        $reference = new RefundReference(provider: $this->config->provider, id: $id, kind: 'refund');
-        $attempt = $this->refundAttempt($request->operationId, $reference, $payment->payment, $amount, $this->config->now);
-        $this->refunds[$id] = $attempt;
-        $this->refunded[$payment->payment->id] = ($this->refunded[$payment->payment->id] ?? 0) + $amount->minorUnits;
-        $this->save(operation: 'refund', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
+        return $this->executed(operation: 'refund', key: $request->idempotencyKey, fingerprint: $fingerprint, run: function () use ($payment, $request, $index): RefundAttempt {
+            $amount = $this->refundableAmount(payment: $payment, requested: $request->amount);
+            $id = $this->newReference(prefix: 'ref', operationId: $request->operationId, index: $index);
+            $reference = new RefundReference(provider: $this->config->provider, id: $id, kind: 'refund');
+            $attempt = $this->refundAttempt($request->operationId, $reference, $payment->payment, $amount, $this->config->now);
+            $this->refunds[$id] = $attempt;
+            $this->refunded[$payment->payment->id] = ($this->refunded[$payment->payment->id] ?? 0) + $amount->minorUnits;
 
-        return $attempt;
+            return $attempt;
+        });
     }
 
     public function retrieveRefund(RetrieveRefundRequest $request): RefundAttempt
@@ -468,18 +468,52 @@ final class FakeGatewayCore
             throw new IdempotencyConflictException(message: 'Idempotency key was reused with a different fake request');
         }
 
+        if ($entry['response'] instanceof PaymentException) {
+            throw $entry['response'];
+        }
+
         return $entry['response'];
     }
 
     /**
-     * Recorded only once the request succeeded, so a refused request leaves
-     * its key free for a corrected one.
+     * Runs an operation and saves what it answered under the key — a
+     * refusal as well as a result. Stripe saves the first response once the
+     * endpoint has begun executing, errors included, and answers every
+     * retry with the same key from it
+     * (https://docs.stripe.com/api/idempotent_requests): a request refused
+     * for the payment's state or balance spends its key, and the same key
+     * with a corrected request is a conflict. Parameter validation and key
+     * conflicts are refused before this and save nothing.
+     *
+     * @template T of PaymentAttempt|RefundAttempt
      *
      * @param non-empty-string $operation
      * @param non-empty-string|null $key
      * @param non-empty-string $fingerprint
+     * @param \Closure(): T $run
+     * @return T
      */
-    private function save(string $operation, ?string $key, string $fingerprint, PaymentAttempt|RefundAttempt $response): void
+    private function executed(string $operation, ?string $key, string $fingerprint, \Closure $run): PaymentAttempt|RefundAttempt
+    {
+        try {
+            $response = $run();
+        } catch (PaymentException $refused) {
+            $this->save(operation: $operation, key: $key, fingerprint: $fingerprint, response: $refused);
+
+            throw $refused;
+        }
+
+        $this->save(operation: $operation, key: $key, fingerprint: $fingerprint, response: $response);
+
+        return $response;
+    }
+
+    /**
+     * @param non-empty-string $operation
+     * @param non-empty-string|null $key
+     * @param non-empty-string $fingerprint
+     */
+    private function save(string $operation, ?string $key, string $fingerprint, PaymentAttempt|RefundAttempt|PaymentException $response): void
     {
         if ($key !== null) {
             $this->idempotency[$key] = ['operation' => $operation, 'fingerprint' => $fingerprint, 'response' => $response];

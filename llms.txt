@@ -17,7 +17,11 @@ refund too). A replayed
 replay's `OperationId`) and never overwrites the stored payment — current state
 comes from `retrievePayment()`. Replayed capture/confirm/cancel/refund calls
 also return their saved response without re-running and without the state
-gate; a replayed refund is not counted twice. Create state without a pinned
+gate; a replayed refund is not counted twice. A refusal for state, balance or
+a capture above the authorization is saved too (Stripe saves errors once the
+endpoint runs): the same request + key rethrows the same exception instance,
+a corrected request with that key → `IdempotencyConflictException`; a zero
+amount (validation) and a key conflict save nothing. Create state without a pinned
 `createState`: no paymentMethod → `RequiresPaymentMethod`; manual confirmation
 → `Pending`; manual capture → `RequiresCapture`; else `Succeeded`
 (`capturedAmount` = amount when `Succeeded`, zero otherwise). State gating

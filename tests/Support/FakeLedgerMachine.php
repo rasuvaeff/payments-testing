@@ -87,7 +87,10 @@ final class FakeLedgerMachine
     /**
      * What each key was first used for and what it answered.
      *
-     * @var array<string, array{operation: string, request: int|null, response: list<int|string|PaymentState|null>}>
+     * A refusal for the payment's state or balance is an answer too: the
+     * key keeps the refusal's class and gives it again.
+     *
+     * @var array<string, array{operation: string, request: int|null, response: list<int|string|PaymentState|null>|class-string<\Throwable>}>
      */
     private array $keys = [];
     private ?string $lastKey = null;
@@ -177,13 +180,13 @@ final class FakeLedgerMachine
         }
 
         if ($this->state !== PaymentState::RequiresCapture) {
-            $this->expectFailure($call, PaymentException::class, 'capture refused by state');
+            $this->refused($call, PaymentException::class, 'capture refused by state', 'capture', $amount, $key);
 
             return;
         }
 
         if ($resolved > self::AUTHORIZED) {
-            $this->expectFailure($call, PaymentException::class, 'capture refused');
+            $this->refused($call, PaymentException::class, 'capture refused', 'capture', $amount, $key);
 
             return;
         }
@@ -209,7 +212,7 @@ final class FakeLedgerMachine
         }
 
         if (!\in_array($this->state, [PaymentState::Pending, PaymentState::RequiresAction], strict: true)) {
-            $this->expectFailure($call, PaymentException::class, 'confirm refused');
+            $this->refused($call, PaymentException::class, 'confirm refused', 'confirm', null, $key);
 
             return;
         }
@@ -234,7 +237,7 @@ final class FakeLedgerMachine
         }
 
         if (\in_array($this->state, [PaymentState::Succeeded, PaymentState::Failed, PaymentState::Canceled], strict: true)) {
-            $this->expectFailure($call, PaymentException::class, 'cancel refused');
+            $this->refused($call, PaymentException::class, 'cancel refused', 'cancel', null, $key);
 
             return;
         }
@@ -267,7 +270,7 @@ final class FakeLedgerMachine
         $balance = $this->captured - $this->refunded;
 
         if ($this->state !== PaymentState::Succeeded || $balance === 0 || ($amount ?? 0) > $balance) {
-            $this->expectFailure($call, RefundFailedException::class, 'refund refused');
+            $this->refused($call, RefundFailedException::class, 'refund refused', 'refund', $amount, $key);
 
             return;
         }
@@ -281,6 +284,7 @@ final class FakeLedgerMachine
         if ($key !== null) {
             $this->keys[$key] = ['operation' => 'refund', 'request' => $amount, 'response' => $this->answer($refund)];
             $this->lastKey = $key;
+            $this->lastMoneyKey = $key;
         }
     }
 
@@ -428,6 +432,12 @@ final class FakeLedgerMachine
             return true;
         }
 
+        if (\is_string($saved['response'])) {
+            $this->expectFailure($call, $saved['response'], 'refusal replayed');
+
+            return true;
+        }
+
         Assert::same($this->answer($call()), $saved['response']);
         $this->seen[$operation . ' replayed'] = true;
 
@@ -445,6 +455,29 @@ final class FakeLedgerMachine
 
         if ($key !== null) {
             $this->keys[$key] = ['operation' => $operation, 'request' => $request, 'response' => $this->answer($attempt)];
+            $this->lastKey = $key;
+
+            if ($operation === 'capture') {
+                $this->lastMoneyKey = $key;
+            }
+        }
+    }
+
+    /**
+     * A refusal from the executing endpoint — state, balance, amount above
+     * the authorization — spends the key: the provider saved it.
+     *
+     * @param \Closure(): mixed $call
+     * @param class-string<\Throwable> $expected
+     * @param non-empty-string $label
+     * @param non-empty-string $operation
+     */
+    private function refused(\Closure $call, string $expected, string $label, string $operation, ?int $request, ?string $key): void
+    {
+        $this->expectFailure($call, $expected, $label);
+
+        if ($key !== null) {
+            $this->keys[$key] = ['operation' => $operation, 'request' => $request, 'response' => $expected];
             $this->lastKey = $key;
         }
     }

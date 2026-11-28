@@ -103,9 +103,18 @@ endpoint and parameters of its first request:
   customer (id and provider id), capture and confirmation method, description
   and metadata; for a capture or refund the request's own amount, so an
   omitted amount and the full amount named explicitly differ;
-- a refused request leaves its key unused; calls without a key are distinct.
-  The key is the whole scope: a provider never learns which `OperationId`
-  issued the call.
+- a refused request spends its key, as at Stripe, which "saves the status code
+  and body of the first request made with a given idempotency key" once the
+  endpoint has begun executing, errors included, and answers retries from it
+  (https://docs.stripe.com/api/idempotent_requests). A refusal for the
+  payment's state or balance, or a capture above the authorization, is saved:
+  the same request with the same key gets the same exception instance again
+  (even after the payment has moved on), and a corrected request with that key
+  gets `IdempotencyConflictException` — retry a corrected request with a new
+  key. What Stripe refuses before the endpoint runs saves nothing and leaves
+  the key free: parameter validation (a zero amount here) and a key conflict;
+- calls without a key are distinct. The key is the whole scope: a provider
+  never learns which `OperationId` issued the call.
 
 Also:
 
