@@ -70,6 +70,12 @@ for which a provider saves nothing. A refund amount must be "a positive
 integer" (https://docs.stripe.com/api/refunds/create); Stripe names no minimum
 for a capture, and refusing a zero one is this fake's choice.
 
+`capturedAmount` follows the core's meaning: the gross amount captured. A
+refund never lowers it, and a payment that has captured nothing yet — an
+authorization, a `Pending` create — reports zero. Reconcile an order against
+it, not against `amount`; `examples/reconcile-partial-capture.php` runs the
+cookbook's recipe against the fakes.
+
 A capture never changes `amount`: it stays the created (authorized) amount,
 and `capturedAmount` reports what was taken, so a partial capture of 700 on
 1 200 leaves 700 refundable.

@@ -51,7 +51,13 @@ docker run --rm -v "$PWD":/app -w /app composer:2 composer test
   `RequiresCapture` and never above `amount`; confirm only from
   `Pending`/`RequiresAction`; cancel never from `Succeeded`/`Failed`/`Canceled`;
   refunds only of `Succeeded`, same currency, up to `capturedAmount` less
-  earlier refunds. The state table is the docblock of
+  earlier refunds, only the whole rest without `PartialRefundCapability` and at
+  most `maximumRefunds` of them; a zero capture or refund amount is refused
+  before the key is looked at (validation, nothing saved). A refusal from the
+  executing operation (state, balance, capability) is saved under its key like
+  a result, as Stripe saves errors: the same request rethrows it, a changed one
+  conflicts. A manual-capture payment reaches `Succeeded` through
+  `simulateTransition()` only from `RequiresCapture`/`Processing`. The state table is the docblock of
   `Internal\FakeGatewayCore` and the README; keep all three in step.
   `FakeGatewayCoreTest::ledgerAgreesWithAProviderModel` (rule machine in
   `tests/Support/FakeLedgerMachine.php`, six create scenarios) is the model,
@@ -59,7 +65,8 @@ docker run --rm -v "$PWD":/app -w /app composer:2 composer test
   `canTransitionTo()`. Extend the machine when the fake learns a rule, and
   re-measure the `Classify::cover` shares before changing a threshold.
 - **`amount` is never rewritten by a capture.** `capturedAmount` carries what
-  was taken; the default create state follows the request (no method →
+  was taken, gross (refunds never lower it); `assertCapturePayment()` requires
+  it equal to the request only for a `Succeeded` capture; the default create state follows the request (no method →
   `RequiresPaymentMethod`, manual confirmation → `Pending`, manual capture →
   `RequiresCapture`, else `Succeeded`).
 - **One key space across operations.** A key conflict throws

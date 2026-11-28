@@ -24,7 +24,9 @@ a corrected request with that key → `IdempotencyConflictException`; a zero
 amount (validation) and a key conflict save nothing. Create state without a pinned
 `createState`: no paymentMethod → `RequiresPaymentMethod`; manual confirmation
 → `Pending`; manual capture → `RequiresCapture`; else `Succeeded`
-(`capturedAmount` = amount when `Succeeded`, zero otherwise). State gating
+(`capturedAmount` = amount when `Succeeded`, zero otherwise). `capturedAmount`
+is gross: refunds never lower it; reconcile orders against it (example
+`examples/reconcile-partial-capture.php`). State gating
 (`PaymentException`): capture only from `RequiresCapture`, ≤ amount, same
 currency → `Succeeded` with `capturedAmount` = captured, `amount` unchanged;
 confirm only from `Pending`/`RequiresAction` → `RequiresCapture` (manual
