@@ -71,7 +71,6 @@ final class FakeGatewayCore
     public function createPayment(CreatePaymentRequest $request): PaymentAttempt
     {
         $fingerprint = $this->fingerprint([
-            'create',
             $request->amount->minorUnits,
             $request->amount->currency,
             $request->paymentMethod?->id,
@@ -82,7 +81,7 @@ final class FakeGatewayCore
             $request->metadata,
         ]);
         $index = ++$this->paymentSequence;
-        $saved = $this->saved(key: $request->idempotencyKey, fingerprint: $fingerprint);
+        $saved = $this->saved(operation: 'create', key: $request->idempotencyKey, fingerprint: $fingerprint);
 
         // A replay is answered from the response saved for the key, the way
         // a provider answers it; the payment may have moved on since and is
@@ -104,7 +103,7 @@ final class FakeGatewayCore
         );
         $this->payments[$id] = $attempt;
         $this->captureMethods[$id] = $request->captureMethod;
-        $this->save(key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
+        $this->save(operation: 'create', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
 
         return $attempt;
     }
@@ -118,8 +117,8 @@ final class FakeGatewayCore
     {
         $stored = $this->payment($request->payment);
         $amount = $request->amount ?? $stored->amount;
-        $fingerprint = $this->fingerprint(['capture', $stored->payment->id, $amount->minorUnits, $amount->currency]);
-        $saved = $this->saved(key: $request->idempotencyKey, fingerprint: $fingerprint);
+        $fingerprint = $this->fingerprint([$stored->payment->id, $amount->minorUnits, $amount->currency]);
+        $saved = $this->saved(operation: 'capture', key: $request->idempotencyKey, fingerprint: $fingerprint);
 
         if ($saved instanceof PaymentAttempt) {
             return $this->restamp(attempt: $saved, operationId: $request->operationId);
@@ -136,7 +135,7 @@ final class FakeGatewayCore
         }
 
         $attempt = $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::Succeeded, capturedAmount: $amount);
-        $this->save(key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
+        $this->save(operation: 'capture', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
 
         return $attempt;
     }
@@ -144,8 +143,8 @@ final class FakeGatewayCore
     public function confirmPayment(PaymentOperationRequest $request): PaymentAttempt
     {
         $stored = $this->payment($request->payment);
-        $fingerprint = $this->fingerprint(['confirm', $stored->payment->id]);
-        $saved = $this->saved(key: $request->idempotencyKey, fingerprint: $fingerprint);
+        $fingerprint = $this->fingerprint([$stored->payment->id]);
+        $saved = $this->saved(operation: 'confirm', key: $request->idempotencyKey, fingerprint: $fingerprint);
 
         if ($saved instanceof PaymentAttempt) {
             return $this->restamp(attempt: $saved, operationId: $request->operationId);
@@ -155,7 +154,7 @@ final class FakeGatewayCore
         $attempt = $this->captureMethods[$stored->payment->id] === CaptureMethod::Manual
             ? $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::RequiresCapture, capturedAmount: $this->nothing($stored->amount))
             : $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::Succeeded, capturedAmount: $stored->amount);
-        $this->save(key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
+        $this->save(operation: 'confirm', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
 
         return $attempt;
     }
@@ -163,8 +162,8 @@ final class FakeGatewayCore
     public function cancelPayment(PaymentOperationRequest $request): PaymentAttempt
     {
         $stored = $this->payment($request->payment);
-        $fingerprint = $this->fingerprint(['cancel', $stored->payment->id]);
-        $saved = $this->saved(key: $request->idempotencyKey, fingerprint: $fingerprint);
+        $fingerprint = $this->fingerprint([$stored->payment->id]);
+        $saved = $this->saved(operation: 'cancel', key: $request->idempotencyKey, fingerprint: $fingerprint);
 
         if ($saved instanceof PaymentAttempt) {
             return $this->restamp(attempt: $saved, operationId: $request->operationId);
@@ -182,7 +181,7 @@ final class FakeGatewayCore
             operation: 'canceled',
         );
         $attempt = $this->move(stored: $stored, operationId: $request->operationId, state: PaymentState::Canceled, capturedAmount: $stored->capturedAmount);
-        $this->save(key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
+        $this->save(operation: 'cancel', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
 
         return $attempt;
     }
@@ -216,14 +215,13 @@ final class FakeGatewayCore
     {
         $payment = $this->payment($request->payment);
         $fingerprint = $this->fingerprint([
-            'refund',
             $payment->payment->id,
             $request->amount?->minorUnits,
             $request->amount?->currency,
             $request->reason?->value,
         ]);
         $index = ++$this->refundSequence;
-        $saved = $this->saved(key: $request->idempotencyKey, fingerprint: $fingerprint);
+        $saved = $this->saved(operation: 'refund', key: $request->idempotencyKey, fingerprint: $fingerprint);
 
         // Answered from the saved refund: a replay neither moves money again
         // nor counts against the balance a second time.
@@ -237,7 +235,7 @@ final class FakeGatewayCore
         $attempt = $this->refundAttempt($request->operationId, $reference, $payment->payment, $amount, $this->config->now);
         $this->refunds[$id] = $attempt;
         $this->refunded[$payment->payment->id] = ($this->refunded[$payment->payment->id] ?? 0) + $amount->minorUnits;
-        $this->save(key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
+        $this->save(operation: 'refund', key: $request->idempotencyKey, fingerprint: $fingerprint, response: $attempt);
 
         return $attempt;
     }
@@ -430,33 +428,37 @@ final class FakeGatewayCore
      * operation here would make the fake accept a key collision that the
      * real gateway refuses.
      *
+     * @param non-empty-string $operation
      * @param non-empty-string|null $key
      * @param non-empty-string $fingerprint
      */
-    private function saved(?string $key, string $fingerprint): PaymentAttempt|RefundAttempt|null
+    private function saved(string $operation, ?string $key, string $fingerprint): PaymentAttempt|RefundAttempt|null
     {
         if ($key === null || !isset($this->idempotency[$key])) {
             return null;
         }
 
-        if ($this->idempotency[$key]['fingerprint'] !== $fingerprint) {
+        $entry = $this->idempotency[$key];
+
+        if ($entry['operation'] !== $operation || $entry['fingerprint'] !== $fingerprint) {
             throw new IdempotencyConflictException(message: 'Idempotency key was reused with a different fake request');
         }
 
-        return $this->idempotency[$key]['response'];
+        return $entry['response'];
     }
 
     /**
      * Recorded only once the request succeeded, so a refused request leaves
      * its key free for a corrected one.
      *
+     * @param non-empty-string $operation
      * @param non-empty-string|null $key
      * @param non-empty-string $fingerprint
      */
-    private function save(?string $key, string $fingerprint, PaymentAttempt|RefundAttempt $response): void
+    private function save(string $operation, ?string $key, string $fingerprint, PaymentAttempt|RefundAttempt $response): void
     {
         if ($key !== null) {
-            $this->idempotency[$key] = ['fingerprint' => $fingerprint, 'response' => $response];
+            $this->idempotency[$key] = ['operation' => $operation, 'fingerprint' => $fingerprint, 'response' => $response];
         }
     }
 

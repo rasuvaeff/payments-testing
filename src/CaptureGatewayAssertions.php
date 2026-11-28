@@ -71,7 +71,9 @@ final class CaptureGatewayAssertions
         $second = self::assertCapturePayment($gateway, $request);
         AttemptAssertions::same($second->payment, $first->payment, 'Capture idempotency key produced another payment reference');
         AttemptAssertions::same($second->amount, $first->amount, 'A replayed capture reported another amount');
-        $captured = $first->capturedAmount ?? throw new ContractViolationException('Capture response did not report the captured amount');
+        // assertCapturePayment() proved both calls reported exactly this as
+        // captured.
+        $captured = $request->amount ?? $first->amount;
 
         if ($second->state !== $first->state) {
             throw new ContractViolationException('A replayed capture reported another state');

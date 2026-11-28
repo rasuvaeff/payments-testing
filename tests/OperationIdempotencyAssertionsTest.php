@@ -199,6 +199,29 @@ final class OperationIdempotencyAssertionsTest
     }
 
     /**
+     * After a partial capture the probe steps off what was captured, not
+     * off the authorization the payment still reports as `amount`.
+     */
+    public function probesAPartialCaptureFromTheCapturedAmount(): void
+    {
+        $amounts = [];
+        $gateway = new ScriptedOperationGateway(static function (string $operation, int $call, CapturePaymentRequest|PaymentOperationRequest $request) use (&$amounts): PaymentAttempt {
+            \assert($request instanceof CapturePaymentRequest);
+            $amounts[] = $request->amount?->minorUnits;
+
+            if ($call === 3) {
+                throw new \InvalidArgumentException('key reused');
+            }
+
+            return ScriptedOperationGateway::attempt($request->operationId, 'pay_1', 100, captured: $request->amount);
+        });
+
+        CaptureGatewayAssertions::assertCapturePaymentIdempotency($gateway, $this->capture(new Money(40, 'EUR')));
+
+        Assert::same($amounts, [40, 40, 39]);
+    }
+
+    /**
      * A timeout or an outage says nothing about the key; counting it as a
      * refusal would let a flaky sandbox pass the assertion.
      */
