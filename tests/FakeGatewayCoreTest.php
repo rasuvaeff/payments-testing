@@ -46,22 +46,24 @@ final class FakeGatewayCoreTest
     /**
      * Minimum share of sequences (in percent) that must take each branch of
      * the ledger model, set at roughly half of the share measured over
-     * repeated 300-run samples (replays: 5-7%, measured 2026-11-28).
+     * repeated samples (2026-11-28). Keyed capture, confirm and refund
+     * replays land in 4-7% of sequences; at 500 runs a 1% gate expects 20+
+     * hits, so it fails only when a branch is truly lost.
      */
     private const array LEDGER_BRANCHES = [
         'capture accepted' => 10,
         'capture refused' => 5,
         'capture refused by state' => 40,
-        'capture replayed' => 2,
+        'capture replayed' => 1,
         'confirm accepted' => 8,
         'confirm refused' => 30,
-        'confirm replayed' => 2,
+        'confirm replayed' => 1,
         'cancel accepted' => 20,
         'cancel refused' => 25,
         'cancel replayed' => 5,
         'refund accepted' => 8,
         'refund refused' => 30,
-        'refund replayed' => 2,
+        'refund replayed' => 1,
         'create replayed' => 40,
         'key conflict' => 40,
     ];
@@ -713,7 +715,7 @@ final class FakeGatewayCoreTest
      *
      * @param value-of<FakeLedgerMachine::SCENARIOS> $scenario
      */
-    #[Property(runs: 300)]
+    #[Property(runs: 500)]
     public function ledgerAgreesWithAProviderModel(string $scenario, RuleSequence $sequence): void
     {
         $machine = null;

@@ -90,6 +90,7 @@ final class FakeLedgerMachine
      */
     private array $keys = [];
     private ?string $lastKey = null;
+    private ?string $lastMoneyKey = null;
 
     /**
      * @param value-of<self::SCENARIOS> $scenario
@@ -292,6 +293,28 @@ final class FakeLedgerMachine
     public function hasKeyedCall(): bool
     {
         return $this->lastKey !== null;
+    }
+
+    /**
+     * Repeats the last keyed capture or refund the provider accepted — the
+     * money-moving replays, which a uniform draw of rules reaches rarely.
+     */
+    #[Rule]
+    #[Precondition('hasKeyedMoneyCall')]
+    public function replayLastMoneyCall(): void
+    {
+        $key = $this->lastMoneyKey;
+        \assert($key !== null);
+        $saved = $this->keys[$key];
+
+        $saved['operation'] === 'capture'
+            ? $this->capture(amount: $saved['request'], key: $key)
+            : $this->refund(amount: $saved['request'], key: $key);
+    }
+
+    public function hasKeyedMoneyCall(): bool
+    {
+        return $this->lastMoneyKey !== null;
     }
 
     /**

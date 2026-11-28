@@ -16,6 +16,11 @@ use Rasuvaeff\PaymentsTesting\ContractViolationException;
 use Rasuvaeff\PaymentsTesting\FakeGatewayConfig;
 use Rasuvaeff\PaymentsTesting\Internal\AttemptAssertions;
 use Rasuvaeff\PaymentsTesting\Internal\FakeGatewayCore;
+use Rasuvaeff\PropertyTesting\ArbitraryInterface;
+use Rasuvaeff\PropertyTesting\Classify;
+use Rasuvaeff\PropertyTesting\Gen;
+use Rasuvaeff\PropertyTesting\Property;
+use Testo\Assert;
 use Testo\Assert\ExpectNoAssertions;
 use Testo\Codecov\Covers;
 use Testo\Data\DataProvider;
@@ -272,5 +277,46 @@ final class AttemptAssertionsTest
             operationId: new OperationId(value: 'refund-1'),
             payment: $payment,
         ));
+    }
+
+    /**
+     * Two values are the same exactly when every field is identical as a
+     * string or int. Numeric lookalikes (`100`/`1e2`/`0100`, `10`/`010`)
+     * are drawn often, because loose comparison called them equal.
+     */
+    #[Property(runs: 300)]
+    public function treatsValuesAsTheSameExactlyWhenEveryFieldIsIdentical(string $left, string $right, int $units, int $otherUnits): void
+    {
+        Classify::cover($left === $right, 'identical strings', 5);
+        // Same number, other spelling: what loose `==` called equal.
+        Classify::cover($left !== $right && (float) $left === (float) $right, 'numeric lookalikes', 10);
+
+        $pairs = [
+            [new OperationId($left), new OperationId($right), $left === $right],
+            [new PaymentReference(new PaymentProvider('fake'), $left), new PaymentReference(new PaymentProvider('fake'), $right), $left === $right],
+            [new Money($units, 'EUR'), new Money($otherUnits, 'EUR'), $units === $otherUnits],
+        ];
+
+        foreach ($pairs as [$actual, $expected, $same]) {
+            try {
+                AttemptAssertions::same($actual, $expected, 'differs');
+                Assert::true($same);
+            } catch (ContractViolationException) {
+                Assert::false($same);
+            }
+        }
+    }
+
+    /** @return array<string, ArbitraryInterface> */
+    public static function treatsValuesAsTheSameExactlyWhenEveryFieldIsIdenticalGenerators(): array
+    {
+        $numeric = Gen::elements(['100', '1e2', '0100', '100.0', '10', '010', '1']);
+
+        return [
+            'left' => $numeric,
+            'right' => $numeric,
+            'units' => Gen::intBetween(0, 3),
+            'otherUnits' => Gen::intBetween(0, 3),
+        ];
     }
 }
