@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- **Fixed:** a replayed `createPayment()` (same idempotency key, same request) no longer rewrites the stored payment. The fake rebuilt the attempt from `FakeGatewayConfig::$createState` and the request amount and saved it, so a payment created as `RequiresCapture` and captured for 5000 read back as `RequiresCapture`/1000 after the replay. A replay now returns the response saved for the key — the payment as it was created, with the replay's `OperationId` — which is what a provider does (https://docs.stripe.com/api/idempotent_requests), and the stored payment is left as it is. **Behaviour change** for tests that relied on the rollback.
+
 ## 0.1.2 — 2026-11-22
 
 - `composer mutation` now runs Infection with `--with-uncovered`, so code the tests execute without naming it in `#[Covers]` is mutated and counted (overall MSI was 41% when measured this way, now 100% against `minMsi` 100). `Internal\AbstractFakeGateway`, `Internal\AttemptAssertions` and `Internal\FakeGatewayCore` were named in no `#[Covers]` and caused all 94 Not Covered mutants. Added `FakeGatewayCoreTest` (pinned fake references, idempotency scoping per operation and payment, null-safe reads, unknown/foreign refund references) and `AttemptAssertionsTest` (every contract violation message). `infection.json5` gained the template's signature-default ignore regex, `testFrameworkOptions` (Unit suite only) and disabled `PublicVisibility`/`ProtectedVisibility`; three equivalent `MethodCallRemoval` mutants in `AttemptAssertions` are ignored with a comment. The capture fingerprint and the confirm/cancel/capture idempotency scope inside `FakeGatewayCore` no longer use string concatenation (`serialize([...])` and a nested array); both are internal and not observable, so behaviour is unchanged.

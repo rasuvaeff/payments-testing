@@ -7,7 +7,10 @@ Rules: namespace `Rasuvaeff\PaymentsTesting`; contracts come from
 only the base `PaymentGatewayInterface`. Use `FakeCaptureGateway`,
 `FakeConfirmGateway`, `FakeCancelGateway` or `FakeRefundGateway` when that
 optional interface is required. Idempotency keys replay only identical request
-fingerprints; a reused key with different data throws. Time is fixed via
+fingerprints; a reused key with different data throws. A replayed
+`createPayment()` returns the saved create response (re-stamped with the
+replay's `OperationId`) and never overwrites the stored payment — current state
+comes from `retrievePayment()`. Time is fixed via
 `FakeGatewayConfig::$now` — never the wall clock. Assertions throw
 `ContractViolationException` (extends `RuntimeException`) on violations and
 work with any test framework.

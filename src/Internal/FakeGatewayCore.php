@@ -30,6 +30,8 @@ final class FakeGatewayCore
 {
     /** @var array<string, PaymentAttempt> */
     private array $payments = [];
+    /** @var array<string, PaymentAttempt> */
+    private array $createResponses = [];
     /** @var array<string, RefundAttempt> */
     private array $refunds = [];
     /** @var array<string, IdempotencyEntry> */
@@ -65,6 +67,21 @@ final class FakeGatewayCore
             index: ++$this->paymentSequence,
             entries: $this->paymentIdempotency,
         );
+        $original = $this->createResponses[$id] ?? null;
+
+        // A replay is answered from the response saved for the key, the way
+        // a provider answers it; the payment may have moved on since and is
+        // left exactly as it is.
+        if ($original instanceof PaymentAttempt) {
+            return $this->paymentAttempt(
+                operationId: $request->operationId,
+                reference: $original->payment,
+                amount: $original->amount,
+                state: $original->state,
+                createdAt: $original->createdAt,
+            );
+        }
+
         $reference = new PaymentReference(provider: $this->config->provider, id: $id, kind: 'payment');
         $attempt = $this->paymentAttempt(
             operationId: $request->operationId,
@@ -74,6 +91,7 @@ final class FakeGatewayCore
             createdAt: $this->config->now,
         );
         $this->payments[$id] = $attempt;
+        $this->createResponses[$id] = $attempt;
 
         return $attempt;
     }

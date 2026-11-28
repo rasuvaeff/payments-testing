@@ -12,8 +12,10 @@ use Rasuvaeff\Payments\OperationId;
 use Rasuvaeff\Payments\PaymentOperationRequest;
 use Rasuvaeff\Payments\PaymentProvider;
 use Rasuvaeff\Payments\PaymentReference;
+use Rasuvaeff\Payments\PaymentState;
 use Rasuvaeff\Payments\RefundReason;
 use Rasuvaeff\Payments\RefundReference;
+use Rasuvaeff\Payments\RetrievePaymentRequest;
 use Rasuvaeff\Payments\RetrieveRefundRequest;
 use Rasuvaeff\PaymentsTesting\FakeGatewayConfig;
 use Rasuvaeff\PaymentsTesting\Internal\FakeGatewayCore;
@@ -115,6 +117,37 @@ final class FakeGatewayCoreTest
 
         Expect::exception(\InvalidArgumentException::class)->withMessage('Idempotency key was reused with a different fake request');
         $this->core->capturePayment($this->capture($payment, 'capture-key', new Money(minorUnits: 100, currency: 'USD')));
+    }
+
+    /**
+     * A provider answers a replayed create from the response it saved for
+     * the key and leaves the payment itself alone (Stripe "saves the status
+     * code and body of the first request made with a given idempotency key
+     * ... Retries with the same key return the saved response",
+     * https://docs.stripe.com/api/idempotent_requests). Rebuilding the
+     * payment on replay rolled a captured payment back to its creation state,
+     * so an application test "a resubmitted form keeps the order paid" went
+     * red without an application bug.
+     */
+    public function replayedCreateLeavesTheStoredPaymentAlone(): void
+    {
+        $core = new FakeGatewayCore(new FakeGatewayConfig(createState: PaymentState::RequiresCapture));
+        $created = $core->createPayment(Fixtures::createPayment(operation: 'operation-1', idempotencyKey: 'create-key'));
+        $core->capturePayment($this->capture($created->payment, null, new Money(minorUnits: 5_000, currency: 'EUR')));
+
+        $replayed = $core->createPayment(Fixtures::createPayment(operation: 'operation-2', idempotencyKey: 'create-key'));
+        $current = $core->retrievePayment(new RetrievePaymentRequest(
+            operationId: new OperationId(value: 'operation-3'),
+            payment: $created->payment,
+        ));
+
+        Assert::same($replayed->payment, $created->payment);
+        Assert::same($replayed->operationId->value, 'operation-2');
+        Assert::same($replayed->state, PaymentState::RequiresCapture);
+        Assert::same($replayed->amount->minorUnits, 1_200);
+        Assert::same($replayed->createdAt, $created->createdAt);
+        Assert::same($current->state, PaymentState::Succeeded);
+        Assert::same($current->amount->minorUnits, 5_000);
     }
 
     public function replaysCaptureWithTheSameKeyAndRequest(): void

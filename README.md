@@ -46,6 +46,10 @@ The fakes are fully deterministic:
   the same provider reference. The key is the whole scope: a provider never
   learns which `OperationId` issued the call, so two operations sharing one key
   replay each other exactly as the real gateway would.
+- A replayed `createPayment()` answers from the response saved for the key —
+  the payment as it was created, stamped with the replay's `OperationId` — and
+  leaves the stored payment alone. A payment captured after creation stays
+  captured; read its current state with `retrievePayment()`.
 - Reusing a key with different request data throws; calls without a key
   receive distinct deterministic references.
 - References from another provider and unknown references are rejected.
